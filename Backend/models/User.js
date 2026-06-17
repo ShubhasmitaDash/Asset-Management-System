@@ -1,31 +1,15 @@
 const mongoose = require('mongoose');
+const bcrypt = require('bcryptjs');
 
 const UserSchema = new mongoose.Schema({
-    // MongoDB automatically makes a unique String ID, but we can explicitly 
-    // include employeeId or keep this structure aligned for your team's queries.
-    name: {
+    // User_ID (PK) is automatically handled by MongoDB (_id)
+    User_Name: {
         type: String,
-        required: [true, 'Please add a user name'],
+        required: [true, 'Please add a username'],
+        unique: true,
         trim: true
     },
-    department: {
-        type: String,
-        required: [true, 'Please specify the department'],
-        trim: true
-    },
-    designation: {
-        type: String,
-        required: [true, 'Please specify the designation (e.g., Manager, Developer)'],
-        trim: true
-    },
-    phone: {
-        type: String,
-        required: [true, 'Please add a contact phone number'],
-        trim: true
-    },
-    // We keep email, password, and role here because your requirements document 
-    // mentions a "Login with admin/user roles" feature!
-    email: {
+    Email: {
         type: String,
         required: [true, 'Please add an email address'],
         unique: true,
@@ -34,20 +18,35 @@ const UserSchema = new mongoose.Schema({
             'Please add a valid email address'
         ]
     },
-    password: {
+    Password: {
         type: String,
         required: [true, 'Please add a password'],
-        minlength: [6, 'Password must be at least 6 characters long']
+        minlength: 6,
+        select: false // This hides the password by default when fetching user data
     },
-    role: {
+    Role: {
         type: String,
-        enum: ['Admin', 'User'],
-        default: 'User'
+        enum: ['Admin', 'Employee'],
+        default: 'Employee'
     },
     createdAt: {
         type: Date,
         default: Date.now
     }
 });
+
+// 🔐 Pre-save middleware to encrypt password before saving
+UserSchema.pre('save', async function(next) {
+    if (!this.isModified('Password')) {
+        next();
+    }
+    const salt = await bcrypt.genSalt(10);
+    this.Password = await bcrypt.hash(this.Password, salt);
+});
+
+// 🔑 Helper method to match typed password with hashed password during login
+UserSchema.methods.matchPassword = async function(enteredPassword) {
+    return await bcrypt.compare(enteredPassword, this.Password);
+};
 
 module.exports = mongoose.model('User', UserSchema);
