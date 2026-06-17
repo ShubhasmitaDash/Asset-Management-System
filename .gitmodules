@@ -1,0 +1,3 @@
+[submodule "ams"]
+	path = ams
+	url = https://github.com/kruteedeepa/ams.git
