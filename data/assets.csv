@@ -1,0 +1,6 @@
+Asset_ID,Asset_Name,Department,Purchase_Year,Cost,Useful_Life
+1,Computer,IT,2022,50000,5
+2,Printer,IT,2021,20000,4
+3,Server,IT,2020,100000,10
+4,Generator,Electrical,2019,150000,15
+5,Crane,Mechanical,2018,250000,20
