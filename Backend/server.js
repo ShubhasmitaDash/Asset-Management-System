@@ -37,6 +37,10 @@ app.use('/api/maintenance', require('./routes/maintenanceRoutes'));
 
 // 🔌 MOUNT OUR NEW VENDOR ROUTER HERE!
 app.use('/api/vendors', require('./routes/vendorRoutes'));
+
+//  ALLOCATION ROUTER
+app.use("/api/allocations",require("./routes/allocationRouter"));
+
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
     console.log(`🖥️  Server is listening like a waiter on port ${PORT}...`);
