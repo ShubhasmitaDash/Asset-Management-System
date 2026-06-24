@@ -41,8 +41,6 @@ app.use('/api/vendors', require('./routes/vendorRoutes'));
 //  ALLOCATION ROUTER
 app.use("/api/allocations",require("./routes/allocationRouter"));
 
-app.use('/api/history', require('./routes/assetHistoryRoutes'));
-
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
     console.log(`🖥️  Server is listening like a waiter on port ${PORT}...`);
