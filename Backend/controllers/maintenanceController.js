@@ -1,69 +1,107 @@
-const Maintenance = require('../models/Maintenance');
-const Asset = require('../models/Asset');
+const Maintenance = require("../models/Maintenance");
+const Asset = require("../models/Asset");
 
-// @desc    Log a new maintenance/repair event
-// @route   POST /api/maintenance
-// @access  Public (or Protected Admin/Staff later)
+// 1. Log new maintenance + set asset to "Under Repair"
 const logMaintenance = async (req, res) => {
-    try {
-        const { Asset_ID, Service_Date, Remarks } = req.body;
+  try {
+    const { asset_id, technician_name, issue_description, remarks, cost } = req.body;
 
-        // 1. Verify if the asset actually exists before filing a ticket
-        const assetExists = await Asset.findById(Asset_ID);
-        if (!assetExists) {
-            return res.status(404).json({ success: false, message: 'Cannot log maintenance; Target Asset ID not found' });
-        }
+    const log = new Maintenance({
+      asset_id,
+      technician_name,
+      issue_description,
+      remarks,
+      cost,
+      status_after_service: "Under Repair",
+    });
+    await log.save();
 
-        // 2. Create the entry
-        const log = await Maintenance.create({
-            Asset_ID,
-            Service_Date,
-            Remarks
-        });
+    await Asset.findByIdAndUpdate(asset_id, { status: "Under Repair" });
 
-        // 3. OPTIONAL AUTOMATION LINK FOR AMRITA: 
-        // Automatically switch asset status to 'Under Repair' when maintenance is logged!
-        assetExists.Status = 'Under Repair';
-        await assetExists.save();
-
-        res.status(201).json({
-            success: true,
-            message: 'Maintenance event logged successfully, asset status set to Under Repair.',
-            data: log
-        });
-
-    } catch (error) {
-        res.status(500).json({
-            success: false,
-            message: 'Failed to create maintenance log',
-            error: error.message
-        });
-    }
+    res.status(201).json({ message: "Maintenance logged", log });
+  } catch (error) {
+    res.status(500).json({ message: "Error", error: error.message });
+  }
 };
 
-// @desc    Get complete repair/maintenance history for a specific asset
-// @route   GET /api/maintenance/asset/:assetId
-// @access  Public
-const getAssetHistory = async (req, res) => {
-    try {
-        // Find all logs that have a matching Asset_ID foreign key pointer
-        const history = await Maintenance.find({ Asset_ID: req.params.assetId }).sort({ Service_Date: -1 });
+// 2. Mark maintenance done + set asset back to "Available"
+const completeMaintenance = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { remarks } = req.body;
 
-        res.status(200).json({
-            success: true,
-            count: history.length,
-            data: history
-        });
-    } catch (error) {
-        res.status(500).json({
-            success: false,
-            message: 'Failed to fetch asset history logs',
-            error: error.message
-        });
+    const log = await Maintenance.findByIdAndUpdate(
+      id,
+      { remarks, status_after_service: "Available" },
+      { new: true }
+    );
+
+    if (!log) return res.status(404).json({ message: "Record not found" });
+
+    await Asset.findByIdAndUpdate(log.asset_id, { status: "Available" });
+
+    res.status(200).json({ message: "Maintenance completed", log });
+  } catch (error) {
+    res.status(500).json({ message: "Error", error: error.message });
+  }
+};
+
+// 3. Get all maintenance records (admin view)
+const getAllMaintenance = async (req, res) => {
+  try {
+    const records = await Maintenance.find()
+      .sort({ created_at: -1 })
+      .populate("asset_id", "asset_name serial_number status");
+
+    res.status(200).json(records);
+  } catch (error) {
+    res.status(500).json({ message: "Error", error: error.message });
+  }
+};
+
+// 4. Get maintenance history of one specific asset
+const getMaintenanceHistory = async (req, res) => {
+  try {
+    const { asset_id } = req.params;
+    const history = await Maintenance.find({ asset_id })
+      .sort({ service_date: -1 })
+      .populate("asset_id", "asset_name serial_number");
+
+    res.status(200).json(history);
+  } catch (error) {
+    res.status(500).json({ message: "Error", error: error.message });
+  }
+};
+
+// 5. Manually update any asset's status
+const updateAssetStatus = async (req, res) => {
+  try {
+    const { asset_id } = req.params;
+    const { status } = req.body;
+
+    const validStatuses = ["Available", "In Use", "Under Repair", "Disposed"];
+    if (!validStatuses.includes(status)) {
+      return res.status(400).json({ message: "Invalid status value" });
     }
+
+    const asset = await Asset.findByIdAndUpdate(
+      asset_id,
+      { status },
+      { new: true }
+    );
+
+    if (!asset) return res.status(404).json({ message: "Asset not found" });
+
+    res.status(200).json({ message: "Status updated", asset });
+  } catch (error) {
+    res.status(500).json({ message: "Error", error: error.message });
+  }
 };
 
 module.exports = {
-    logMaintenance,
-    getAssetHistory
+  logMaintenance,
+  completeMaintenance,
+  getAllMaintenance,
+  getMaintenanceHistory,
+  updateAssetStatus,
 };

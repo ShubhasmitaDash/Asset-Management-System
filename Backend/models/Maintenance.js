@@ -1,25 +1,39 @@
-const mongoose = require('mongoose');
+const mongoose = require("mongoose");
 
-const MaintenanceSchema = new mongoose.Schema({
-    // MongoDB automatically creates a unique ID for each entry, which acts as your Maintenance_ID (PK)
-    Asset_ID: {
-        type: mongoose.Schema.Types.ObjectId,
-        ref: 'Asset', // This establishes the Foreign Key relationship linking back to the Asset model!
-        required: [true, 'Please link this maintenance log to an existing Asset ID']
-    },
-    Service_Date: {
-        type: Date,
-        required: [true, 'Please enter the date the service took place']
-    },
-    Remarks: {
-        type: String,
-        required: [true, 'Please add details or remarks about the maintenance (e.g., RAM upgraded, screen fixed)'],
-        trim: true
-    },
-    createdAt: {
-        type: Date,
-        default: Date.now
-    }
+const maintenanceSchema = new mongoose.Schema({
+  asset_id: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "Asset",
+    required: true,
+  },
+  service_date: {
+    type: Date,
+    default: Date.now,
+  },
+  technician_name: {
+    type: String,
+    required: true,
+  },
+  issue_description: {
+    type: String,
+    required: true,
+  },
+  remarks: {
+    type: String,
+  },
+  cost: {
+    type: Number,
+    default: 0,
+  },
+  status_after_service: {
+    type: String,
+    enum: ["Available", "In Use", "Under Repair", "Disposed"],
+    default: "Under Repair",
+  },
+  created_at: {
+    type: Date,
+    default: Date.now,
+  },
 });
 
-module.exports = mongoose.model('Maintenance', MaintenanceSchema);
+module.exports = mongoose.model("Maintenance", maintenanceSchema);

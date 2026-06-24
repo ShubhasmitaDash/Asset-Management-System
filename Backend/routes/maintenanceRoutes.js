@@ -1,11 +1,23 @@
 const express = require('express');
 const router = express.Router();
-const { logMaintenance, getAssetHistory } = require('../controllers/maintenanceController');
+const {
+  logMaintenance,
+  completeMaintenance,
+  getAllMaintenance,
+  getMaintenanceHistory,
+  updateAssetStatus,
+} = require('../controllers/maintenanceController');
 
-// Base path: /api/maintenance
-router.route('/').post(logMaintenance);
+// POST   /api/maintenance/log              → log new maintenance
+// PUT    /api/maintenance/complete/:id     → mark repair done
+// GET    /api/maintenance/all              → all records
+// GET    /api/maintenance/:asset_id        → history of one asset
+// PATCH  /api/maintenance/status/:asset_id → change asset status
 
-// Path by Asset ID: /api/maintenance/asset/:assetId
-router.route('/asset/:assetId').get(getAssetHistory);
+router.post('/log', logMaintenance);
+router.put('/complete/:id', completeMaintenance);
+router.get('/all', getAllMaintenance);
+router.get('/:asset_id', getMaintenanceHistory);
+router.patch('/status/:asset_id', updateAssetStatus);
 
 module.exports = router;
