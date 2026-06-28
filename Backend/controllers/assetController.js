@@ -1,13 +1,16 @@
 const Asset = require('../models/Asset');
 
-// @desc    Create/Register a brand new asset
-// @route   POST /api/assets
-// @access  Public
+// @desc     Create/Register a brand new asset
+// @route    POST /api/assets
+// @access   Public
 const createAsset = async (req, res) => {
     try {
-        // We unpack the data coming from the frontend form fields
+        console.log("📥 [BACKEND RECEIVING DATA FROM FRONTEND]:", req.body); // 👈 ADD THIS
+        
         const newAsset = new Asset(req.body);
         const savedAsset = await newAsset.save();
+
+        console.log("💾 [BACKEND SUCCESSFULLY SAVED TO MONGO]:", savedAsset); // 👈 ADD THIS
 
         res.status(201).json({
             success: true,
@@ -15,6 +18,7 @@ const createAsset = async (req, res) => {
             data: savedAsset
         });
     } catch (error) {
+        console.error("❌ [BACKEND CREATION ERROR]:", error.message); // 👈 ADD THIS
         res.status(400).json({
             success: false,
             message: 'Failed to register asset',
@@ -23,18 +27,22 @@ const createAsset = async (req, res) => {
     }
 };
 
-// @desc    Get a list of all registered assets in the inventory
-// @route   GET /api/assets
-// @access  Public
+// @desc     Get a list of all registered assets in the inventory
+// @route    GET /api/assets
+// @access   Public
 const getAllAssets = async (req, res) => {
     try {
         const assets = await Asset.find();
+        
+        console.log("🔍 [BACKEND FETCHING ALL ASSETS FROM MONGO]:", assets); // 👈 ADD THIS
+        
         res.status(200).json({
             success: true,
             count: assets.length,
             data: assets
         });
     } catch (error) {
+        console.error("❌ [BACKEND FETCH ERROR]:", error.message); // 👈 ADD THIS
         res.status(500).json({
             success: false,
             message: 'Server Error: Unable to fetch assets',
@@ -42,6 +50,8 @@ const getAllAssets = async (req, res) => {
         });
     }
 };
+
+// ... keep getAssetById, updateAsset, and deleteAsset exactly the same ...
 // @desc    Get a single asset by its database ID
 // @route   GET /api/assets/:id
 const getAssetById = async (req, res) => {
