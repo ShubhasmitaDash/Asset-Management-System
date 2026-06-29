@@ -4,8 +4,7 @@ const {
   logMaintenance,
   completeMaintenance,
   getAllMaintenance,
-  getMaintenanceHistory,
-  updateAssetStatus,
+  getMaintenanceHistory
 } = require('../controllers/maintenanceController');
 
 // POST   /api/maintenance/log              → log new maintenance
@@ -18,6 +17,6 @@ router.post('/log', logMaintenance);
 router.put('/complete/:id', completeMaintenance);
 router.get('/all', getAllMaintenance);
 router.get('/:asset_id', getMaintenanceHistory);
-router.patch('/status/:asset_id', updateAssetStatus);
+// router.patch('/status/:asset_id', updateAssetStatus);
 
 module.exports = router;

@@ -12,15 +12,15 @@ const authorize = require("../middlewares/roleMiddleware");
 
 
 // ISSUE ASSET
-router.post("/issue", auth, authorize("Admin"), issueAsset);
+router.post("/issue",                            issueAsset);
 
 // RETURN ASSET
-router.put("/return/:allocationId", auth, authorize("Admin"), returnAsset);
+router.put("/return/:allocationId",              returnAsset);
 
 //GET ALL
-router.get("/", auth, authorize("Admin"), getAllocations);
+router.get("/",                                  getAllocations);
 
 //GET BY ID
-router.get("/:id", auth, authorize("Admin"), getAllocationById);
+router.get("/:id",                               getAllocationById);
 
 module.exports = router;
