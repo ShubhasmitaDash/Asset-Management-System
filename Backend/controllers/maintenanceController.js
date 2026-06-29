@@ -1,78 +1,66 @@
 const Maintenance = require('../models/Maintenance');
-const Asset = require('../models/Asset');
 
-// @desc    Log a new maintenance/repair event
-// @route   POST /api/maintenance
-// @access  Public
+// POST /api/maintenance/log
 const logMaintenance = async (req, res) => {
-    try {
-        const log = await Maintenance.create(req.body);
+  try {
+    const { asset_id, asset_name, technician_name, issue_description, remarks, cost } = req.body;
 
-        // Update the asset status to Maintenance
-        await Asset.findOneAndUpdate(
-            { id: req.body.assetId },
-            { status: 'Maintenance' }
-        );
-
-        res.status(201).json({
-            success: true,
-            message: 'Maintenance event logged successfully, asset status set to Maintenance.',
-            data: log
-        });
-
-    } catch (error) {
-        res.status(500).json({
-            success: false,
-            message: 'Failed to create maintenance log',
-            error: error.message
-        });
+    if (!asset_id || !technician_name || !issue_description) {
+      return res.status(400).json({ success: false, message: 'asset_id, technician_name and issue_description are required' });
     }
+
+    const log = new Maintenance({
+      asset_id,
+      asset_name:       asset_name || asset_id,
+      technician_name,
+      issue_description,
+      remarks:          remarks || '',
+      cost:             Number(cost) || 0,
+      status:           'In Progress',
+      service_date:     new Date(),
+      next_due_date:    new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+    });
+
+    await log.save();
+    res.status(201).json({ success: true, message: 'Maintenance logged', log });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
 };
 
-// @desc    Get complete repair/maintenance history for a specific asset
-// @route   GET /api/maintenance/asset/:assetId
-// @access  Public
-const getAssetHistory = async (req, res) => {
-    try {
-        const history = await Maintenance.find({ assetId: req.params.assetId }).sort({ serviceDate: -1 });
-
-        res.status(200).json({
-            success: true,
-            count: history.length,
-            data: history
-        });
-    } catch (error) {
-        res.status(500).json({
-            success: false,
-            message: 'Failed to fetch asset history logs',
-            error: error.message
-        });
-    }
-};
-
-// @desc    Get all maintenance logs in the system
-// @route   GET /api/maintenance
-// @access  Public
+// GET /api/maintenance/all
 const getAllMaintenance = async (req, res) => {
-    try {
-        const history = await Maintenance.find().sort({ serviceDate: -1 });
-
-        res.status(200).json({
-            success: true,
-            count: history.length,
-            data: history
-        });
-    } catch (error) {
-        res.status(500).json({
-            success: false,
-            message: 'Failed to fetch maintenance logs',
-            error: error.message
-        });
-    }
+  try {
+    const records = await Maintenance.find().sort({ created_at: -1 });
+    res.status(200).json({ success: true, count: records.length, data: records });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
 };
 
-module.exports = {
-    logMaintenance,
-    getAssetHistory,
-    getAllMaintenance
+// PUT /api/maintenance/complete/:id
+const completeMaintenance = async (req, res) => {
+  try {
+    const log = await Maintenance.findByIdAndUpdate(
+      req.params.id,
+      { status: 'Completed', remarks: req.body.remarks || '' },
+      { new: true }
+    );
+    if (!log) return res.status(404).json({ success: false, message: 'Record not found' });
+    res.status(200).json({ success: true, message: 'Maintenance completed', log });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
 };
+
+// GET /api/maintenance/:asset_id
+const getMaintenanceHistory = async (req, res) => {
+  try {
+    const records = await Maintenance.find({ asset_id: req.params.asset_id }).sort({ service_date: -1 });
+    res.status(200).json({ success: true, count: records.length, data: records });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+module.exports = { logMaintenance, getAllMaintenance, completeMaintenance, getMaintenanceHistory };

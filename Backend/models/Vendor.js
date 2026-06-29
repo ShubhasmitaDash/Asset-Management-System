@@ -1,61 +1,16 @@
 const mongoose = require('mongoose');
 
 const VendorSchema = new mongoose.Schema({
-    id: {
+    // MongoDB automatically generates a unique ID for each entry, which acts as your Vendor_ID (PK)
+    Vendor_Name: {
         type: String,
-        required: true,
-        unique: true
-    },
-    name: {
-        type: String,
-        required: true,
+        required: [true, 'Please add the vendor or supplier name'],
         trim: true
     },
-    contact: {
+    Contact: {
         type: String,
-        required: true,
+        required: [true, 'Please add the vendor contact details (Phone or Email)'],
         trim: true
-    },
-    email: {
-        type: String,
-        trim: true
-    },
-    phone: {
-        type: String,
-        trim: true
-    },
-    city: {
-        type: String,
-        trim: true
-    },
-    country: {
-        type: String,
-        trim: true
-    },
-    category: {
-        type: String,
-        trim: true
-    },
-    status: {
-        type: String,
-        enum: ['Active', 'Inactive'],
-        default: 'Active'
-    },
-    assetsCount: {
-        type: Number,
-        default: 0
-    },
-    totalSpend: {
-        type: Number,
-        default: 0
-    },
-    rating: {
-        type: Number,
-        default: 5
-    },
-    since: {
-        type: Number,
-        default: new Date().getFullYear()
     },
     createdAt: {
         type: Date,

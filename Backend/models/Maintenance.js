@@ -1,41 +1,39 @@
-const mongoose = require('mongoose');
+const mongoose = require("mongoose");
 
-const MaintenanceSchema = new mongoose.Schema({
-    id: {
-        type: String,
-        required: true,
-        unique: true
-    },
-    assetId: {
-        type: String,
-        required: true
-    },
-    assetName: {
-        type: String,
-        required: true
-    },
-    type: {
-        type: String,
-        required: true,
-        trim: true
-    },
-    serviceDate: {
-        type: String,
-        required: true
-    },
-    nextDue: {
-        type: String,
-        required: true
-    },
-    status: {
-        type: String,
-        enum: ['Pending', 'In Progress', 'Completed'],
-        default: 'Pending'
-    },
-    createdAt: {
-        type: Date,
-        default: Date.now
-    }
+const maintenanceSchema = new mongoose.Schema({
+  asset_id: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "Asset",
+    required: true,
+  },
+  service_date: {
+    type: Date,
+    default: Date.now,
+  },
+  technician_name: {
+    type: String,
+    required: true,
+  },
+  issue_description: {
+    type: String,
+    required: true,
+  },
+  remarks: {
+    type: String,
+  },
+  cost: {
+    type: Number,
+    default: 0,
+  },
+  status_after_service: {
+    type: String,
+    enum: ["Available", "In Use", "Under Repair", "Disposed"],
+    default: "Under Repair",
+  },
+  created_at: {
+    type: Date,
+    default: Date.now,
+  },
 });
 
-module.exports = mongoose.model('Maintenance', MaintenanceSchema);
+module.exports = mongoose.model("Maintenance", maintenanceSchema);

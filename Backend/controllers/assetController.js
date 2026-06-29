@@ -1,49 +1,27 @@
 const Asset = require('../models/Asset');
 
-// @desc    Create/Register a brand new asset
-// @route   POST /api/assets
-// @access  Public
+// CREATE
 const createAsset = async (req, res) => {
     try {
-        // We unpack the data coming from the frontend form fields
         const newAsset = new Asset(req.body);
         const savedAsset = await newAsset.save();
-
-        res.status(201).json({
-            success: true,
-            message: 'Asset registered successfully!',
-            data: savedAsset
-        });
+        res.status(201).json({ success: true, message: 'Asset registered successfully!', data: savedAsset });
     } catch (error) {
-        res.status(400).json({
-            success: false,
-            message: 'Failed to register asset',
-            error: error.message
-        });
+        res.status(400).json({ success: false, message: 'Failed to register asset', error: error.message });
     }
 };
 
-// @desc    Get a list of all registered assets in the inventory
-// @route   GET /api/assets
-// @access  Public
+// GET ALL
 const getAllAssets = async (req, res) => {
     try {
         const assets = await Asset.find();
-        res.status(200).json({
-            success: true,
-            count: assets.length,
-            data: assets
-        });
+        res.status(200).json({ success: true, count: assets.length, data: assets });
     } catch (error) {
-        res.status(500).json({
-            success: false,
-            message: 'Server Error: Unable to fetch assets',
-            error: error.message
-        });
+        res.status(500).json({ success: false, message: 'Failed to fetch assets', error: error.message });
     }
 };
-// @desc    Get a single asset by its database ID
-// @route   GET /api/assets/:id
+
+// GET ONE
 const getAssetById = async (req, res) => {
     try {
         const asset = await Asset.findById(req.params.id);
@@ -52,39 +30,37 @@ const getAssetById = async (req, res) => {
         }
         res.status(200).json({ success: true, data: asset });
     } catch (error) {
-        res.status(500).json({ success: false, message: 'Server Error', error: error.message });
+        res.status(500).json({ success: false, message: 'Failed to fetch asset', error: error.message });
     }
 };
 
-// @desc    Update an asset profile (Change status, link users, update fields)
-// @route   PUT /api/assets/:id
+// UPDATE
 const updateAsset = async (req, res) => {
     try {
-        const updatedAsset = await Asset.findByIdAndUpdate(
-            req.params.id, 
-            req.body, 
-            { new: true, runValidators: true } // returns the freshly edited data package
+        const asset = await Asset.findByIdAndUpdate(
+            req.params.id,
+            req.body,
+            { new: true, runValidators: true }
         );
-        if (!updatedAsset) {
+        if (!asset) {
             return res.status(404).json({ success: false, message: 'Asset not found' });
         }
-        res.status(200).json({ success: true, message: 'Asset updated successfully!', data: updatedAsset });
+        res.status(200).json({ success: true, message: 'Asset updated successfully!', data: asset });
     } catch (error) {
-        res.status(400).json({ success: false, message: 'Update failed', error: error.message });
+        res.status(400).json({ success: false, message: 'Failed to update asset', error: error.message });
     }
 };
 
-// @desc    Delete an asset completely from database
-// @route   DELETE /api/assets/:id
+// DELETE
 const deleteAsset = async (req, res) => {
     try {
-        const deletedAsset = await Asset.findByIdAndDelete(req.params.id);
-        if (!deletedAsset) {
+        const asset = await Asset.findByIdAndDelete(req.params.id);
+        if (!asset) {
             return res.status(404).json({ success: false, message: 'Asset not found' });
         }
-        res.status(200).json({ success: true, message: 'Asset deleted permanently from system inventory' });
+        res.status(200).json({ success: true, message: 'Asset deleted successfully!' });
     } catch (error) {
-        res.status(500).json({ success: false, message: 'Server Error', error: error.message });
+        res.status(500).json({ success: false, message: 'Failed to delete asset', error: error.message });
     }
 };
 

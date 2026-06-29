@@ -5,7 +5,17 @@ const Vendor = require('../models/Vendor');
 // @access  Public
 const registerVendor = async (req, res) => {
     try {
-        const newVendor = await Vendor.create(req.body);
+        const { Vendor_Name, Contact } = req.body;
+
+        // Validation check for empty fields
+        if (!Vendor_Name || !Contact) {
+            return res.status(400).json({ success: false, message: 'Please provide both Vendor Name and Contact details' });
+        }
+
+        const newVendor = await Vendor.create({
+            Vendor_Name,
+            Contact
+        });
 
         res.status(201).json({
             success: true,
@@ -26,7 +36,7 @@ const registerVendor = async (req, res) => {
 // @access  Public
 const getAllVendors = async (req, res) => {
     try {
-        const vendors = await Vendor.find().sort({ name: 1 });
+        const vendors = await Vendor.find().sort({ Vendor_Name: 1 }); // Sort alphabetically
 
         res.status(200).json({
             success: true,
