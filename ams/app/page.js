@@ -1,4 +1,4 @@
-'use client'
+'use client';
 
 import { useState, useRef, useEffect } from 'react'
 import {
@@ -10,7 +10,6 @@ import {
   UserCheck,
   RotateCcw,
   Wrench,
-
   FileBarChart,
   Bell,
   Settings,
@@ -404,6 +403,10 @@ function App() {
   const [globalSearchOpen, setGlobalSearchOpen] = useState(false)
   const globalSearchRef = useRef(null)
 
+  const [assetsListSearch, setAssetsListSearch] = useState('')
+  const [editingAssetId, setEditingAssetId] = useState(null)
+
+
   // Employees state
   const [empSearch, setEmpSearch] = useState('')
   const [empPage, setEmpPage] = useState(1)
@@ -419,7 +422,12 @@ function App() {
   const [maintPage, setMaintPage] = useState(1)
   const MAINT_PER_PAGE = 5
   const [showMaintenanceModal, setShowMaintenanceModal] = useState(false)
-  const [maintForm, setMaintForm] = useState({ asset_id: '', technician_name: '', issue_description: '', remarks: '', cost: '' })
+  const [maintForm, setMaintForm] = useState({ asset_id: '', asset_readable_id: '',asset_name: '', technician_name: '', issue_description: '', remarks: '', cost: '' })
+  const [assetSearch, setAssetSearch] = useState('')
+  const [assetSuggestions, setAssetSuggestions] = useState([])
+  const [maintEmpSearch, setMaintEmpSearch] = useState('')
+  const [empSuggestions, setEmpSuggestions] = useState([])
+  const [maintempSearch, setEmpSearchMaint] = useState('')
   const [maintFormError, setMaintFormError] = useState('')
   const [maintFormSuccess, setMaintFormSuccess] = useState('')
   const [maintFormLoading, setMaintFormLoading] = useState(false)
@@ -431,11 +439,15 @@ function App() {
 
   // Asset Assignment state
   const [assignFilter, setAssignFilter] = useState('All')
+  const [assignEmpSearch, setAssignEmpSearch] = useState('')
+  const [assignEmpSuggestions, setAssignEmpSuggestions] = useState([])
   const [assignSearch, setAssignSearch] = useState('')
   const [assignPage, setAssignPage] = useState(1)
   const ASSIGN_PER_PAGE = 6
   const [showAssignModal, setShowAssignModal] = useState(false)
   const [newAssign, setNewAssign] = useState({ assetId: '', empId: '', returnDate: '' })
+  const [assignAssetSearch, setAssignAssetSearch] = useState('')
+  const [assignAssetSuggestions, setAssignAssetSuggestions] = useState([])
 
   // Return Assets state
   const [returnTab, setReturnTab] = useState('Pending')
@@ -450,22 +462,32 @@ function App() {
   ])
 
   // Live data state (shared across modules)
-  const [assets, setAssets] = useState(dummyAssets)
+  const [assets, setAssets] = useState([])
   const [employees, setEmployees] = useState([])
   const [vendors, setVendors] = useState([])
-  const [assignments, setAssignments] = useState(dummyAssignments)
+  const [assignments, setAssignments] = useState([])
 
   // Fetch all data from MongoDB on load
   useEffect(() => {
     fetch('/api/assets')
-      .then(res => res.json())
-      .then(json => { if (json.success && Array.isArray(json.data)) setAssets(json.data) })
-      .catch(err => console.error('Assets fetch error:', err))
+  .then(res => res.json())
+  .then(json => {
+    if (json.success && Array.isArray(json.data)) {
+      setAssets(json.data)
+      console.log('ASSETS FROM API:', JSON.stringify(json.data.map(a => ({ name: a.Asset_Name, vendor: a.Vendor })), null, 2))
+    }
+  })
+  .catch(err => console.error('Assets fetch error:', err))
 
     fetch('/api/vendors')
-      .then(res => res.json())
-      .then(json => { if (json.success && Array.isArray(json.data)) setVendors(json.data) })
-      .catch(err => console.error('Vendors fetch error:', err))
+  .then(res => res.json())
+  .then(json => {
+    if (json.success && Array.isArray(json.data)) {
+      setVendors(json.data)
+      console.log('VENDORS FROM API:', json.data.map(v => v.name))
+    }
+  })
+  .catch(err => console.error('Vendors fetch error:', err))
 
     fetch('/api/maintenance')
       .then(res => res.json())
@@ -476,7 +498,46 @@ function App() {
       .then(res => res.json())
       .then(json => { if (json.success && Array.isArray(json.data)) setEmployees(json.data) })
       .catch(err => console.error('Employees fetch error:', err))
+
+    fetch('/api/categories')
+      .then(res => res.json())
+      .then(json => {
+        if (json.success && Array.isArray(json.data)) setCustomCategories(json.data)})
+      .catch(err => console.error('Categories fetch error:', err))
+    fetch('/api/assignments')
+      .then(res => res.json())
+      .then(json => { if (json.success && Array.isArray(json.data)) setAssignments(json.data) })
+      .catch(err => console.error('Assignments fetch error:', err))
   }, [])
+    // Generate notifications from real data
+  useEffect(() => {
+    if (!assets.length && !assignments.length) return
+    const now = Date.now()
+    const thirtyDays = 30*24*60*60*1000
+    const generated = []
+
+    assignments.slice(0,3).forEach((a,i) => {
+      generated.push({ id: `N-ASN-${i}`, type: 'assignment', title: 'Asset Assignment', desc: `${a.assetName} (${a.assetId}) assigned to ${a.employee}`, time: a.assignedDate, timestamp: now - i*60*1000, read: i > 0, target: 'Asset Assignment' })
+    })
+
+    maintenanceRecords.filter(m=>m.status==='In Progress').slice(0,2).forEach((m,i) => {
+      generated.push({ id: `N-MNT-${i}`, type: 'maintenance', title: 'Maintenance In Progress', desc: `${m.assetName} (${m.assetId}) — ${m.type || m.issue_description}`, time: m.serviceDate || 'Recently', timestamp: now - (i+1)*60*60*1000, read: false, target: 'Maintenance' })
+    })
+
+    assets.filter(a => {
+      if (!a.Warranty) return false
+      const w = new Date(a.Warranty)
+      return w >= new Date() && w <= new Date(now + thirtyDays)
+    }).slice(0,2).forEach((a,i) => {
+      generated.push({ id: `N-WAR-${i}`, type: 'warranty', title: 'Warranty Expiring Soon', desc: `${a.Asset_Name} (${a.Asset_ID}) warranty expires on ${new Date(a.Warranty).toLocaleDateString()}`, time: 'Upcoming', timestamp: now - (i+2)*60*60*1000, read: false, target: 'Assets' })
+    })
+
+    assets.filter(a=>a.Status==='Available').slice(0,1).forEach((a,i) => {
+      generated.push({ id: `N-INV-${i}`, type: 'inventory', title: 'Asset Available', desc: `${a.Asset_Name} (${a.Asset_ID}) is available for assignment`, time: 'Now', timestamp: now - 3*60*60*1000, read: true, target: 'Asset Assignment' })
+    })
+
+    if (generated.length) setNotifications(generated)
+  }, [assets, assignments, maintenanceRecords])
   // Save to MongoDB helper
   const saveToDb = async (collection, data) => {
     try {
@@ -510,6 +571,12 @@ function App() {
 
   // Add/Edit modal state
   const [showEmpModal, setShowEmpModal] = useState(false)
+  const [showAssetForm, setShowAssetForm] = useState(false)
+  const [selectedAsset, setSelectedAsset] = useState(null)
+  const [showAssetDetail, setShowAssetDetail] = useState(false)
+  const [activeDetailTab, setActiveDetailTab] = useState('Assignment History')
+  const [showQRModal, setShowQRModal] = useState(false)
+  const [qrAsset, setQrAsset] = useState(null)
   const [editEmpTarget, setEditEmpTarget] = useState(null)
   const [empForm, setEmpForm] = useState({ name: '', department: '', designation: '', email: '', phone: '' })
   const [empFormError, setEmpFormError] = useState('')
@@ -521,6 +588,8 @@ function App() {
 
   const [showCategoryModal, setShowCategoryModal] = useState(false)
   const [catForm, setCatForm] = useState({ name: '' })
+  const [catImage, setCatImage] = useState(null)
+  const [assetFormImage, setAssetFormImage] = useState(null)
   const [catFormError, setCatFormError] = useState('')
   const [customCategories, setCustomCategories] = useState([])
 
@@ -618,12 +687,13 @@ function App() {
       const deviceId = devices[0]?.deviceId
       codeReader.decodeFromVideoDevice(deviceId, qrVideoRef.current, (result, err) => {
         if (result) {
-          const found = dummyAssets.find(a => result.getText().includes(a.id))
-          if (found) {
-            setScannedAssetIdx(dummyAssets.indexOf(found))
-          } else {
-            setScannedAssetIdx(0)
-          }
+          const qrText = result.getText()
+const found = assets.find(a => qrText.includes(a.Asset_ID) || qrText.includes(a.Serial_No))
+if (found) {
+  setScannedAssetIdx(found.Asset_ID)
+} else {
+  setScannedAssetIdx(assets[0]?.Asset_ID || 0)
+}
           stopRealCamera()
           setQrState('scanned')
         }
@@ -665,8 +735,8 @@ function App() {
       const jsQR = (await import('jsqr')).default
       const code = jsQR(imageData.data, imageData.width, imageData.height)
       if (code) {
-        const found = dummyAssets.find(a => code.data.includes(a.id))
-        setScannedAssetIdx(found ? dummyAssets.indexOf(found) : 0)
+        const found = assets.find(a => code.data.includes(a.Asset_ID) || code.data.includes(a.Serial_No))
+        setScannedAssetIdx(found ? found.Asset_ID : assets[0]?.Asset_ID || 0)
         setQrState('scanned')
       } else {
         setQrError('❌ No QR code found. Try a clearer image.')
@@ -676,22 +746,32 @@ function App() {
     img.src = URL.createObjectURL(file)
   }
   const generateQRCode = async (asset) => {
-    const QRCode = (await import('qrcode')).default
-    // QR contains asset info as text
-    const qrText = `ASSET:${asset.id}|NAME:${asset.name}|SERIAL:${asset.serial}|STATUS:${asset.status}`
-    const dataUrl = await QRCode.toDataURL(qrText, {
-      width: 300,
-      margin: 2,
-      color: { dark: '#1E3A5F', light: '#ffffff' },
-    })
-    setQrCodeDataUrl(dataUrl)
-    setQrModalAsset(asset)
-  }
+  const QRCode = (await import('qrcode')).default
+  const assignedInfo = assignments.find(x => x.assetId === asset.id)
+  const qrText = [
+  `Asset ID   : ${asset.id}`,
+  `Name       : ${asset.name}`,
+  `Type       : ${asset.category || ''}`,
+  `Serial No  : ${asset.serial}`,
+  `Status     : ${asset.status}`,
+  `Purchase   : ${asset.purchaseDate ? new Date(asset.purchaseDate).toLocaleDateString() : '-'}`,
+  `Warranty   : ${asset.warranty ? new Date(asset.warranty).toLocaleDateString() : '-'}`,
+  `Assigned To: ${assignedInfo ? `${assignedInfo.employee} (${assignedInfo.department})` : 'Not Assigned'}`,
+].join('\n')
+  const dataUrl = await QRCode.toDataURL(qrText, {
+    width: 300,
+    margin: 2,
+    color: { dark: '#1E3A5F', light: '#ffffff' },
+  })
+  setQrCodeDataUrl(dataUrl)
+  setQrModalAsset(asset)
+}
   const startScan = () => {
     setQrState('scanning')
     qrTimerRef.current = setTimeout(() => {
       // Pick a random asset from the 10 dummy assets
-      setScannedAssetIdx(Math.floor(Math.random() * dummyAssets.length))
+      const randomAsset = assets[Math.floor(Math.random() * assets.length)]
+setScannedAssetIdx(randomAsset?.Asset_ID || 0)
       setQrState('scanned')
     }, 2800)
   }
@@ -712,6 +792,7 @@ function App() {
     purchaseDate: '',
     purchasePrice: '',
     vendor: '',
+    codalLife: '',
     warrantyExpiry: '',
     location: '',
     description: '',
@@ -780,46 +861,91 @@ function App() {
 
     try {
       // Map form fields to what the backend model expects
+      console.log('IMAGE STATE:', image ? image.substring(0, 50) : 'empty')
+      let compressedImage = ''
+if (image) {
+  const canvas = document.createElement('canvas')
+  const img = new window.Image()
+  await new Promise(resolve => { img.onload = resolve; img.src = image })
+  const MAX = 400
+  const ratio = Math.min(MAX / img.width, MAX / img.height)
+  canvas.width = img.width * ratio
+  canvas.height = img.height * ratio
+  canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height)
+  compressedImage = canvas.toDataURL('image/jpeg', 0.6)
+}
+console.log('COMPRESSED IMAGE LENGTH:', compressedImage.length)
       const assetData = {
-        Asset_Name:    form.assetName,
-        Asset_Type:    form.category,
-        Serial_No:     form.serialNumber,
-        Purchase_Date: form.purchaseDate,
-        Warranty:      form.warrantyExpiry || form.purchaseDate,
-        Status:        'Available',
-      }
+  Asset_Name:    form.assetName,
+  Asset_Type:    form.category,
+  Serial_No:     form.serialNumber,
+  Purchase_Date: form.purchaseDate,
+  Purchase_Price: Number(form.purchasePrice) || 0,
+  Codal_Life: Number(form.codalLife) || 0,
+  Warranty:      form.warrantyExpiry || form.purchaseDate,
+  Vendor:        form.vendor,
+  Status:        'Available',
+ Image: compressedImage || `https://img.icons8.com/fluency/200/${
+  (form.category || '').toLowerCase().includes('laptop') ? 'laptop' :
+  (form.category || '').toLowerCase().includes('desktop') ? 'desktop' :
+  (form.category || '').toLowerCase().includes('monitor') ? 'monitor' :
+  (form.category || '').toLowerCase().includes('mobile') || (form.category || '').toLowerCase().includes('phone') ? 'smartphone' :
+  (form.category || '').toLowerCase().includes('tablet') ? 'tablet' :
+  (form.category || '').toLowerCase().includes('printer') ? 'print' :
+  (form.category || '').toLowerCase().includes('camera') ? 'camera' :
+  (form.category || '').toLowerCase().includes('projector') ? 'projector' :
+  (form.category || '').toLowerCase().includes('server') ? 'server' :
+  'electronics'
+}.png`,
+}
 
-      const res = await fetch('/api/assets', {
-        method:  'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify(assetData),
-      })
+const url = editingAssetId ? `/api/assets/${editingAssetId}` : '/api/assets'
+const method = editingAssetId ? 'PUT' : 'POST'
 
-      const json = await res.json()
+const res = await fetch(url, {
+  method,
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({ ...assetData, Image: compressedImage }),
+})
 
-      if (res.ok) {
-        const newAsset = {
-          id:            json.data?._id || json._id || Date.now().toString(),
-          name:          form.assetName,
-          category:      form.category,
-          serial:        form.serialNumber,
-          model:         form.modelNumber || '',
-          purchaseDate:  form.purchaseDate,
-          purchasePrice: Number(form.purchasePrice) || 0,
-          vendor:        form.vendor || '',
-          warranty:      form.warrantyExpiry,
-          location:      form.location || '',
-          description:   form.description || '',
-          status:        'Available',
-          assignedTo:    '-',
-          image:         '',
-        }
-        setAssets(prev => [...prev, newAsset])
-        alert(`✅ Asset "${form.assetName}" saved to MongoDB!`)
-        handleCancel()
-      } else {
-        alert(`❌ Failed: ${json.error || json.message || 'Unknown error'}`)
-      }
+const json = await res.json()
+
+if (res.ok) {
+  if (editingAssetId) {
+    setAssets(prev => prev.map(x => x._id === editingAssetId ? {
+      ...x,
+      Asset_Name: form.assetName,
+      Asset_Type: form.category,
+      Serial_No: form.serialNumber,
+      Purchase_Date: form.purchaseDate,
+      Codal_Life: Number(form.codalLife) || 0,
+      Warranty: form.warrantyExpiry || form.purchaseDate,
+      Image: compressedImage || x.Image,
+    } : x))
+    alert(`✅ Asset "${form.assetName}" updated!`)
+  } else {
+    const newAsset = {
+      _id:           json.data?._id,
+      Asset_ID:      json.data?.Asset_ID,
+      Asset_Name:    form.assetName,
+      Asset_Type:    form.category,
+      Serial_No:     form.serialNumber,
+      Purchase_Date: form.purchaseDate,
+      Purchase_Price: Number(form.purchasePrice) || 0,
+      Codal_Life:    Number(form.codalLife) || 0,
+      Vendor:        form.vendor,
+      Warranty:      form.warrantyExpiry,
+      Status:        'Available',
+      Image:         compressedImage || assetData.Image,
+    }
+    setAssets(prev => [...prev, newAsset])
+    alert(`✅ Asset "${form.assetName}" saved to MongoDB!`)
+  }
+  setEditingAssetId(null)
+  handleCancel()
+} else {
+  alert(`❌ Failed: ${json.error || json.message || 'Unknown error'}`)
+}
     } catch (err) {
       alert('❌ Could not reach backend. Make sure the server is running on port 5000.')
     }
@@ -1296,7 +1422,7 @@ function App() {
       </div>
     )
   }
-
+  console.log('ASSETS STATE:', assets)
   return (
     <div className="min-h-screen bg-gray-50 p-4 md:p-8">
       {/* Main Application Container */}
@@ -1736,242 +1862,230 @@ function App() {
             {/* Page Content */}
             <div className="flex-1 px-8 py-6">
               {selectedAssetId ? (
-                (() => {
-                  const asset = dummyAssets.find((a) => a.id === selectedAssetId) || dummyAssets[0]
-                  const { assignments, maintenance, activity } = generateAssetHistory(asset)
-                  const formatDate = (d) => {
-                    if (!d) return '-'
-                    if (d.includes('-') && d.split('-')[0].length === 4) {
-                      const [y, m, dd] = d.split('-')
-                      return `${dd}-${m}-${y}`
-                    }
-                    return d
-                  }
-                  const statusBadge =
-                    asset.status === 'Assigned' ? 'bg-green-100 text-green-700 border-green-200'
-                    : asset.status === 'Available' ? 'bg-amber-100 text-amber-700 border-amber-200'
-                    : 'bg-red-100 text-red-700 border-red-200'
-                  const rowStatusCls = (s) =>
-                    s === 'Current' ? 'bg-green-100 text-green-700 border-green-200'
-                    : s === 'Returned' ? 'bg-gray-100 text-gray-700 border-gray-200'
-                    : s === 'In Progress' ? 'bg-orange-100 text-orange-700 border-orange-200'
-                    : 'bg-blue-100 text-blue-700 border-blue-200'
+  (() => {
+    const asset = assets.find((a) => a.Asset_ID === selectedAssetId || a._id === selectedAssetId)
+    if (!asset) {
+      return (
+        <div className="text-center py-20">
+          <p className="text-sm text-gray-500 mb-4">Asset not found.</p>
+          <button onClick={() => setSelectedAssetId(null)} className="px-4 py-2 rounded-lg text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700">
+            Back to Assets
+          </button>
+        </div>
+      )
+    }
+    const assetAssignments = assignments.filter((x) => x.assetId === asset.Asset_ID)
+    const assetMaintenance = maintenanceRecords.filter((x) => x.assetId === asset.Asset_ID)
+    const formatDate = (d) => {
+      if (!d) return '-'
+      const iso = typeof d === 'string' ? d.split('T')[0] : new Date(d).toISOString().split('T')[0]
+      const parts = iso.split('-')
+      return parts.length < 3 ? iso : `${parts[2]}-${parts[1]}-${parts[0]}`
+    }
+    const statusBadge =
+      asset.Status === 'In Use' ? 'bg-blue-100 text-blue-700 border-blue-200'
+      : asset.Status === 'Available' ? 'bg-green-100 text-green-700 border-green-200'
+      : asset.Status === 'Under Repair' ? 'bg-amber-100 text-amber-700 border-amber-200'
+      : 'bg-red-100 text-red-700 border-red-200'
+    const rowStatusCls = (s) =>
+      s === 'Active' ? 'bg-green-100 text-green-700 border-green-200'
+      : s === 'Returned' ? 'bg-gray-100 text-gray-700 border-gray-200'
+      : s === 'In Progress' ? 'bg-orange-100 text-orange-700 border-orange-200'
+      : 'bg-blue-100 text-blue-700 border-blue-200'
+    const fallbackImg = `https://img.icons8.com/fluency/200/${
+      (asset.Asset_Type || '').toLowerCase().includes('laptop') ? 'laptop' :
+      (asset.Asset_Type || '').toLowerCase().includes('mobile') || (asset.Asset_Type || '').toLowerCase().includes('phone') ? 'smartphone' :
+      (asset.Asset_Type || '').toLowerCase().includes('monitor') ? 'monitor' :
+      (asset.Asset_Type || '').toLowerCase().includes('printer') ? 'print' :
+      (asset.Asset_Type || '').toLowerCase().includes('tablet') ? 'tablet' :
+      (asset.Asset_Type || '').toLowerCase().includes('camera') ? 'camera' :
+      (asset.Asset_Type || '').toLowerCase().includes('desktop') ? 'desktop' :
+      'electronics'
+    }.png`
+    const assignedInfo = assetAssignments.find(x => x.status === 'Active')
 
-                  const activityIconMap = {
-                    create: { icon: Plus, color: 'text-blue-600', bg: 'bg-blue-100' },
-                    purchase: { icon: Package, color: 'text-emerald-600', bg: 'bg-emerald-100' },
-                    assign: { icon: UserPlus, color: 'text-green-600', bg: 'bg-green-100' },
-                    return: { icon: RotateCw, color: 'text-cyan-600', bg: 'bg-cyan-100' },
-                    maintenance: { icon: Wrench, color: 'text-red-600', bg: 'bg-red-100' },
-                    warranty: { icon: Shield, color: 'text-purple-600', bg: 'bg-purple-100' },
-                  }
+    return (
+      <div className="animate-in fade-in duration-300 space-y-6">
+        <div className="flex items-start justify-between flex-wrap gap-3">
+          <div>
+            <h2 className="text-2xl font-bold text-gray-900">Asset Details</h2>
+            <p className="text-sm text-gray-500 mt-1">
+              Dashboard <span className="mx-1">/</span>{' '}
+              <button onClick={() => setSelectedAssetId(null)} className="hover:text-blue-600 underline-offset-2 hover:underline">Assets</button>{' '}
+              <span className="mx-1">/</span> {asset.Asset_ID}
+            </p>
+          </div>
+          <div className="flex items-center gap-2 flex-wrap">
+            <button onClick={() => setSelectedAssetId(null)} className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold text-gray-700 bg-white border border-gray-300 hover:bg-gray-50 transition-colors">
+              <ArrowLeft className="w-4 h-4" /> Back
+            </button>
+            <button onClick={() => alert(`Edit ${asset.Asset_ID}`)} className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700 transition-colors shadow-sm">
+              <Edit3 className="w-4 h-4" /> Edit
+            </button>
+            <button onClick={() => window.print()} className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold text-gray-700 bg-white border border-gray-300 hover:bg-gray-50 transition-colors">
+              <PrintIcon className="w-4 h-4" /> Print
+            </button>
+           <button onClick={() => generateQRCode({ id: asset.Asset_ID, name: asset.Asset_Name, serial: asset.Serial_No, status: asset.Status, category: asset.Asset_Type, purchaseDate: asset.Purchase_Date, warranty: asset.Warranty })} className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold text-white bg-green-600 hover:bg-green-700 transition-colors shadow-sm">
+  <QrIcon className="w-4 h-4" /> Generate QR
+</button>
+          </div>
+        </div>
 
-                  return (
-                    <div className="animate-in fade-in duration-300 space-y-6">
-                      {/* Header */}
-                      <div className="flex items-start justify-between flex-wrap gap-3">
-                        <div>
-                          <h2 className="text-2xl font-bold text-gray-900">Asset Details</h2>
-                          <p className="text-sm text-gray-500 mt-1">
-                            Dashboard <span className="mx-1">/</span>{' '}
-                            <button onClick={() => setSelectedAssetId(null)} className="hover:text-blue-600 underline-offset-2 hover:underline">Assets</button>{' '}
-                            <span className="mx-1">/</span> {asset.id}
-                          </p>
-                        </div>
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <button onClick={() => setSelectedAssetId(null)} className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold text-gray-700 bg-white border border-gray-300 hover:bg-gray-50 transition-colors">
-                            <ArrowLeft className="w-4 h-4" />
-                            Back
-                          </button>
-                          <button onClick={() => alert(`Edit ${asset.id}`)} className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700 transition-colors shadow-sm">
-                            <Edit3 className="w-4 h-4" />
-                            Edit
-                          </button>
-                          <button onClick={() => window.print()} className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold text-gray-700 bg-white border border-gray-300 hover:bg-gray-50 transition-colors">
-                            <PrintIcon className="w-4 h-4" />
-                            Print
-                          </button>
-                          <button onClick={() => generateQRCode(asset)} className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold text-white bg-green-600 hover:bg-green-700 transition-colors shadow-sm">
-                            <QrIcon className="w-4 h-4" />
-                            Generate QR
-                          </button>
-                        </div>
-                      </div>
-
-                      {/* Asset Info Card */}
-                      <div className="bg-white border border-gray-200 rounded-xl p-6 grid grid-cols-1 lg:grid-cols-12 gap-8">
-                        {/* Image */}
-                        <div className="lg:col-span-4 flex items-center justify-center bg-gray-50 rounded-xl overflow-hidden p-6 min-h-[320px]">
-                          <img src={asset.image} alt={asset.name} className="max-h-[320px] w-full object-contain" />
-                        </div>
-
-                        {/* Details */}
-                        <div className="lg:col-span-8">
-                          {/* Top row: Asset ID + Status */}
-                          <div className="grid grid-cols-2 gap-6 pb-5 border-b border-gray-100">
-                            <div>
-                              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Asset ID</p>
-                              <p className="text-xl font-bold text-blue-600 mt-1">{asset.id}</p>
-                            </div>
-                            <div>
-                              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Status</p>
-                              <span className={`inline-flex px-3 py-1 mt-1 rounded-md text-xs font-bold border ${statusBadge}`}>
-                                {asset.status}
-                              </span>
-                            </div>
-                          </div>
-
-                          {/* Detail rows */}
-                          <div className="divide-y divide-gray-100">
-                            {[
-                              [['Asset Name', asset.name], ['Category', asset.category]],
-                              [['Manufacturer', asset.manufacturer], ['Model Number', asset.model]],
-                              [['Serial No.', asset.serial], ['Purchase Date', formatDate(asset.purchaseDate)]],
-                              [['Purchase Price', `₹ ${asset.purchasePrice.toLocaleString('en-IN')}.00`], ['Warranty Expiry', formatDate(asset.warranty)]],
-                              [['Vendor', asset.vendor], ['Location', asset.location]],
-                              [['Assigned To', asset.assignedTo || '-'], ['Description', asset.description]],
-                            ].map((pair, i) => (
-                              <div key={i} className="grid grid-cols-2 gap-6 py-3.5">
-                                {pair.map(([k, v]) => (
-                                  <div key={k} className="grid grid-cols-2 gap-3 items-center">
-                                    <span className="text-sm text-gray-500">{k}</span>
-                                    <span className="text-sm font-semibold text-gray-900 break-words">{v}</span>
-                                  </div>
-                                ))}
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* Tabs Card */}
-                      <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
-                        <div className="border-b border-gray-200 px-6 flex items-center gap-2 overflow-x-auto">
-                          {['Assignment History', 'Maintenance History', 'Activity Log'].map((tab) => {
-                            const active = detailsTab === tab
-                            return (
-                              <button
-                                key={tab}
-                                onClick={() => setDetailsTab(tab)}
-                                className={`relative px-4 py-4 text-sm font-semibold transition-colors whitespace-nowrap ${
-                                  active ? 'text-blue-600' : 'text-gray-600 hover:text-gray-900'
-                                }`}
-                              >
-                                {tab}
-                                {active && <span className="absolute left-0 right-0 -bottom-px h-0.5 bg-blue-600 rounded-t" />}
-                              </button>
-                            )
-                          })}
-                        </div>
-
-                        {/* ASSIGNMENT HISTORY */}
-                        {detailsTab === 'Assignment History' && (
-                          <div className="animate-in fade-in duration-200 overflow-x-auto">
-                            <table className="w-full">
-                              <thead>
-                                <tr className="bg-gray-50 border-b border-gray-200">
-                                  <th className="px-6 py-3.5 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Assigned To</th>
-                                  <th className="px-6 py-3.5 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Assigned Date</th>
-                                  <th className="px-6 py-3.5 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Returned Date</th>
-                                  <th className="px-6 py-3.5 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Status</th>
-                                </tr>
-                              </thead>
-                              <tbody className="divide-y divide-gray-100">
-                                {assignments.length === 0 ? (
-                                  <tr>
-                                    <td colSpan={4} className="px-6 py-12 text-center text-sm text-gray-500">No assignment history yet</td>
-                                  </tr>
-                                ) : (
-                                  assignments.map((row, i) => (
-                                    <tr key={i} className="hover:bg-gray-50 transition-colors">
-                                      <td className="px-6 py-4 text-sm font-semibold text-gray-800">{row.name}</td>
-                                      <td className="px-6 py-4 text-sm text-gray-700">{row.assignedDate}</td>
-                                      <td className="px-6 py-4 text-sm text-gray-700">{row.returnedDate || '-'}</td>
-                                      <td className="px-6 py-4">
-                                        <span className={`inline-flex px-2.5 py-1 rounded-md text-xs font-bold border ${rowStatusCls(row.status)}`}>
-                                          {row.status}
-                                        </span>
-                                      </td>
-                                    </tr>
-                                  ))
-                                )}
-                              </tbody>
-                            </table>
-                          </div>
-                        )}
-
-                        {/* MAINTENANCE HISTORY */}
-                        {detailsTab === 'Maintenance History' && (
-                          <div className="animate-in fade-in duration-200 overflow-x-auto">
-                            <table className="w-full">
-                              <thead>
-                                <tr className="bg-gray-50 border-b border-gray-200">
-                                  <th className="px-6 py-3.5 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Maintenance ID</th>
-                                  <th className="px-6 py-3.5 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Type</th>
-                                  <th className="px-6 py-3.5 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Service Date</th>
-                                  <th className="px-6 py-3.5 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Technician</th>
-                                  <th className="px-6 py-3.5 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Status</th>
-                                </tr>
-                              </thead>
-                              <tbody className="divide-y divide-gray-100">
-                                {maintenance.map((row, i) => (
-                                  <tr key={i} className="hover:bg-gray-50 transition-colors">
-                                    <td className="px-6 py-4 text-sm font-semibold text-blue-600">{row.id}</td>
-                                    <td className="px-6 py-4 text-sm text-gray-800">{row.type}</td>
-                                    <td className="px-6 py-4 text-sm text-gray-700">{row.date}</td>
-                                    <td className="px-6 py-4 text-sm text-gray-700">{row.technician}</td>
-                                    <td className="px-6 py-4">
-                                      <span className={`inline-flex px-2.5 py-1 rounded-md text-xs font-bold border ${row.status === 'Completed' ? 'bg-green-100 text-green-700 border-green-200' : 'bg-orange-100 text-orange-700 border-orange-200'}`}>
-                                        {row.status}
-                                      </span>
-                                    </td>
-                                  </tr>
-                                ))}
-                              </tbody>
-                            </table>
-                          </div>
-                        )}
-
-                        {/* ACTIVITY LOG */}
-                        {detailsTab === 'Activity Log' && (
-                          <div className="animate-in fade-in duration-200 p-6">
-                            <div className="relative pl-4">
-                              <span className="absolute left-[15px] top-1 bottom-1 w-0.5 bg-gray-200" />
-                              <ul className="space-y-5">
-                                {activity.map((act, i) => {
-                                  const meta = activityIconMap[act.type] || activityIconMap.create
-                                  const Icon = meta.icon
-                                  return (
-                                    <li key={i} className="relative flex gap-4">
-                                      <div className={`relative z-10 w-8 h-8 rounded-full ${meta.bg} flex items-center justify-center flex-shrink-0`}>
-                                        <Icon className={`w-4 h-4 ${meta.color}`} />
-                                      </div>
-                                      <div className="flex-1 leading-tight pt-1">
-                                        <p className="text-sm text-gray-800">{act.text}</p>
-                                        <p className="text-xs text-gray-400 mt-0.5">{act.time}</p>
-                                      </div>
-                                    </li>
-                                  )
-                                })}
-                              </ul>
-                            </div>
-                          </div>
-                        )}
-                      </div>
+        <div className="bg-white border border-gray-200 rounded-xl p-6 grid grid-cols-1 lg:grid-cols-12 gap-8">
+          <div className="lg:col-span-4 flex items-center justify-center bg-gray-50 rounded-xl overflow-hidden p-6 min-h-[320px]">
+            <img src={asset.Image && asset.Image.length > 10 ? asset.Image : fallbackImg} alt={asset.Asset_Name} className="max-h-[260px] object-contain" />
+          </div>
+          <div className="lg:col-span-8">
+            <div className="grid grid-cols-2 gap-6 pb-5 border-b border-gray-100">
+              <div>
+                <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Asset ID</p>
+                <p className="text-xl font-bold text-blue-600 mt-1">{asset.Asset_ID}</p>
+              </div>
+              <div>
+                <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Status</p>
+                <span className={`inline-flex px-3 py-1 mt-1 rounded-md text-xs font-bold border ${statusBadge}`}>{asset.Status}</span>
+              </div>
+            </div>
+            <div className="divide-y divide-gray-100">
+              {[
+                [['Asset Name', asset.Asset_Name], ['Category', asset.Asset_Type]],
+                [['Serial No.', asset.Serial_No], ['Purchase Date', formatDate(asset.Purchase_Date)]],
+                [['Codal Life', asset.Codal_Life ? `${asset.Codal_Life} Years` : '-'], ['Warranty Expiry', formatDate(asset.Warranty)]],
+                [['Assigned To', assignedInfo ? assignedInfo.employee : '-'], ['Department', assignedInfo ? assignedInfo.department : '-']],
+              ].map((pair, i) => (
+                <div key={i} className="grid grid-cols-2 gap-6 py-3.5">
+                  {pair.map(([k, v]) => (
+                    <div key={k} className="grid grid-cols-2 gap-3 items-center">
+                      <span className="text-sm text-gray-500">{k}</span>
+                      <span className="text-sm font-semibold text-gray-900 break-words">{v}</span>
                     </div>
-                  )
-                })()
-              ) : activeMenu === 'Assets' ? (
-                <>
-                  <div className="mb-6">
-                    <h2 className="text-2xl font-bold text-gray-900">Add New Asset</h2>
-                    <p className="text-sm text-gray-500 mt-1">
-                      Dashboard <span className="mx-1">/</span> Assets{' '}
-                      <span className="mx-1">/</span> Add Asset
-                    </p>
-                  </div>
+                  ))}
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
 
-                  <form onSubmit={handleSubmit}>
+        <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+          <div className="border-b border-gray-200 px-6 flex items-center gap-2 overflow-x-auto">
+            {['Assignment History', 'Maintenance History', 'Activity Log'].map((tab) => {
+              const active = detailsTab === tab
+              return (
+                <button key={tab} onClick={() => setDetailsTab(tab)} className={`relative px-4 py-4 text-sm font-semibold transition-colors whitespace-nowrap ${active ? 'text-blue-600' : 'text-gray-600 hover:text-gray-900'}`}>
+                  {tab}
+                  {active && <span className="absolute left-0 right-0 -bottom-px h-0.5 bg-blue-600 rounded-t" />}
+                </button>
+              )
+            })}
+          </div>
+
+          {detailsTab === 'Assignment History' && (
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead>
+                  <tr className="bg-gray-50 border-b border-gray-200">
+                    <th className="px-6 py-3.5 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Assigned To</th>
+                    <th className="px-6 py-3.5 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Assigned Date</th>
+                    <th className="px-6 py-3.5 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Returned Date</th>
+                    <th className="px-6 py-3.5 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Status</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {assetAssignments.length === 0 ? (
+                    <tr><td colSpan={4} className="px-6 py-12 text-center text-sm text-gray-500">No assignment history yet</td></tr>
+                  ) : assetAssignments.map((row, i) => (
+                    <tr key={i} className="hover:bg-gray-50 transition-colors">
+                      <td className="px-6 py-4 text-sm font-semibold text-gray-800">{row.employee}</td>
+                      <td className="px-6 py-4 text-sm text-gray-700">{row.assignedDate}</td>
+                      <td className="px-6 py-4 text-sm text-gray-700">{row.returnDate}</td>
+                      <td className="px-6 py-4"><span className={`inline-flex px-2.5 py-1 rounded-md text-xs font-bold border ${rowStatusCls(row.status)}`}>{row.status}</span></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {detailsTab === 'Maintenance History' && (
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead>
+                  <tr className="bg-gray-50 border-b border-gray-200">
+                    <th className="px-6 py-3.5 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Maintenance ID</th>
+                    <th className="px-6 py-3.5 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Type</th>
+                    <th className="px-6 py-3.5 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Service Date</th>
+                    <th className="px-6 py-3.5 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Status</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {assetMaintenance.length === 0 ? (
+                    <tr><td colSpan={4} className="px-6 py-12 text-center text-sm text-gray-500">No maintenance history yet</td></tr>
+                  ) : assetMaintenance.map((row, i) => (
+                    <tr key={i} className="hover:bg-gray-50 transition-colors">
+                      <td className="px-6 py-4 text-sm font-semibold text-blue-600">{row.id}</td>
+                      <td className="px-6 py-4 text-sm text-gray-800">{row.type}</td>
+                      <td className="px-6 py-4 text-sm text-gray-700">{row.serviceDate}</td>
+                      <td className="px-6 py-4"><span className={`inline-flex px-2.5 py-1 rounded-md text-xs font-bold border ${row.status === 'Completed' ? 'bg-green-100 text-green-700 border-green-200' : 'bg-orange-100 text-orange-700 border-orange-200'}`}>{row.status}</span></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {detailsTab === 'Activity Log' && (
+            <div className="p-6 text-center text-sm text-gray-500">No activity log available for this asset yet.</div>
+          )}
+        </div>
+      </div>
+    )
+  })()
+) : activeMenu === 'Assets' ? (
+  <>
+    {/* Header */}
+    <div className="mb-6 flex items-center justify-between flex-wrap gap-3">
+  <div>
+    <h2 className="text-2xl font-bold text-gray-900">Assets</h2>
+    <p className="text-sm text-gray-500 mt-1">Dashboard / Assets</p>
+  </div>
+  <div className="flex items-center gap-3">
+    <div className="relative">
+      <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+      <input
+        type="text"
+        value={assetsListSearch}
+        onChange={(e) => setAssetsListSearch(e.target.value)}
+        placeholder="Search by Asset ID or name..."
+        className="w-64 pl-10 pr-9 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white"
+      />
+      {assetsListSearch && (
+        <button
+          onClick={() => setAssetsListSearch('')}
+          className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-700 text-lg leading-none"
+          title="Clear"
+        >
+          ×
+        </button>
+      )}
+    </div>
+    <button
+      onClick={() => { setEditingAssetId(null); handleCancel();setShowAssetForm(true); setShowAssetDetail(false) }}
+      className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700 transition-colors shadow-sm"
+    >
+      <span className="text-lg">+</span> Add New Asset
+    </button>
+  </div>
+</div>
+    {/* Add Asset Form Modal */}
+    {showAssetForm && (
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50" onClick={() => setShowAssetForm(false)}>
+        <div className="bg-white rounded-2xl w-full max-w-3xl shadow-2xl max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+          <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+            <h3 className="text-lg font-bold text-gray-900">{editingAssetId ? 'Edit Asset' : 'Add New Asset'}</h3>
+            <button onClick={() => setShowAssetForm(false)} className="w-8 h-8 rounded-full hover:bg-gray-100 flex items-center justify-center text-gray-500">✕</button>
+          </div>
+          <div className="p-6">
+    <form onSubmit={(e) => { handleSubmit(e); setShowAssetForm(false) }}>
                     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                       {/* Asset Information Card */}
                       <div className="lg:col-span-2 bg-white border border-gray-200 rounded-xl p-6">
@@ -2006,9 +2120,15 @@ function App() {
                                 className="w-full px-3.5 py-2.5 border border-gray-300 rounded-lg text-sm bg-white appearance-none focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-700"
                               >
                                 <option value="" disabled>Select category</option>
-                                {['Laptop','Desktop','Monitor','Printer','Mobile Device','Tablet','Camera','Projector','Peripheral',...customCategories].map(c => (
-                                  <option key={c} value={c}>{c}</option>
-                                ))}
+                                {customCategories.length > 0 
+  ? customCategories.map(c => (
+      <option key={c._id || c.name || c} value={c.name || c}>{c.name || c}</option>
+    ))
+  : ['Laptop','Desktop','Monitor','Printer','Mobile Device','Tablet','Camera','Projector','Peripheral'].map(c => (
+      <option key={c} value={c}>{c}</option>
+    ))
+}
+
                               </select>
                               <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500 pointer-events-none" />
                             </div>
@@ -2075,42 +2195,60 @@ function App() {
                           </div>
 
                           {/* Vendor */}
-                          <div>
-                            <label className="block text-sm font-semibold text-gray-800 mb-1.5">
-                              Vendor
-                            </label>
-                            <div className="relative">
-                              <select
-                                name="vendor"
-                                value={form.vendor}
-                                onChange={handleChange}
-                                className="w-full px-3.5 py-2.5 border border-gray-300 rounded-lg text-sm bg-white appearance-none focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-700"
-                              >
-                                <option value="" disabled>Select vendor</option>
-                                <option value="dell">Dell</option>
-                                <option value="hp">HP</option>
-                                <option value="lenovo">Lenovo</option>
-                                <option value="apple">Apple</option>
-                                <option value="samsung">Samsung</option>
-                              </select>
-                              <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500 pointer-events-none" />
-                            </div>
-                          </div>
+<div>
+  <label className="block text-sm font-semibold text-gray-800 mb-1.5">
+    Vendor
+  </label>
+  <div className="relative">
+    <select
+      name="vendor"
+      value={form.vendor}
+      onChange={handleChange}
+      className="w-full px-3.5 py-2.5 border border-gray-300 rounded-lg text-sm bg-white appearance-none focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-700"
+    >
+      <option value="" disabled>Select vendor</option>
+      {(vendors.length > 0 ? vendors : dummyVendors).map(v => (
+        <option key={v._id || v.id || v.name} value={v.name}>
+          {v.name}
+        </option>
+      ))}
+    </select>
+    <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500 pointer-events-none" />
+  </div>
+</div>
 
                           {/* Warranty Expiry */}
                           <div>
-                            <label className="block text-sm font-semibold text-gray-800 mb-1.5">
-                              Warranty Expiry
-                              <span className="ml-2 text-xs font-normal text-blue-500">(auto: 2 yrs from purchase)</span>
-                            </label>
-                            <input
-                              type="date"
-                              name="warrantyExpiry"
-                              value={form.warrantyExpiry}
-                              onChange={handleChange}
-                              min={form.purchaseDate || new Date().toISOString().split('T')[0]}
-                              className="w-full px-3.5 py-2.5 border border-gray-300 rounded-lg text-sm placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-600 bg-blue-50"
-                            />
+                            <label className="block text-sm font-semibold text-gray-800 mb-1.5">Codal Life (Years)</label>
+<input
+  type="number"
+  name="codalLife"
+  placeholder="e.g. 3"
+  value={form.codalLife || ''}
+  onChange={(e) => {
+    const years = Number(e.target.value)
+    setForm(p => ({
+      ...p,
+      codalLife: e.target.value,
+      warrantyExpiry: form.purchaseDate && years
+        ? new Date(new Date(form.purchaseDate).setFullYear(new Date(form.purchaseDate).getFullYear() + years)).toISOString().split('T')[0]
+        : p.warrantyExpiry
+    }))
+  }}
+  className="w-full px-3.5 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-700"
+/>
+
+<label className="block text-sm font-semibold text-gray-800 mb-1.5 mt-3">Warranty Expiry</label>
+<input
+  type="date"
+  name="warrantyExpiry"
+  value={form.warrantyExpiry}
+  onChange={handleChange}
+  className="w-full px-3.5 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-700"
+/>
+{form.warrantyExpiry && (
+  <p className="text-xs text-green-600 mt-1">Warranty expires: {new Date(form.warrantyExpiry).toLocaleDateString()}</p>
+)}
                             {form.warrantyExpiry && (
                               <p className="text-xs text-gray-400 mt-1">Auto-set to 2 years · You can adjust if needed</p>
                             )}
@@ -2211,7 +2349,298 @@ function App() {
                       </button>
                     </div>
                   </form>
-                </>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                  {/* Asset Detail Modal */}
+                  {showAssetDetail && selectedAsset && (
+  <div className="fixed inset-0 z-50 overflow-y-auto bg-white">
+    <div className="max-w-4xl mx-auto p-6">
+      {/* Header */}
+      <div className="flex items-center justify-between mb-6">
+        <div>
+          <h2 className="text-2xl font-bold text-gray-900">Asset Details</h2>
+          <p className="text-sm text-gray-500">Dashboard / Assets / {selectedAsset.Asset_ID}</p>
+        </div>
+        <div className="flex gap-3">
+          <button className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700">
+            ✏️ Edit
+          </button>
+          <button className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold border border-gray-300 hover:bg-gray-50">
+            🖨️ Print
+          </button>
+          <button
+            onClick={() => { setQrAsset(selectedAsset); setShowQRModal(true) }}
+            className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold text-white bg-green-600 hover:bg-green-700"
+          >
+            📱 Generate QR
+          </button>
+          <button onClick={() => setShowAssetDetail(false)} className="w-9 h-9 rounded-full hover:bg-gray-100 flex items-center justify-center text-gray-500 border border-gray-200">✕</button>
+        </div>
+      </div>
+
+      {/* Asset Card */}
+      <div className="bg-white border border-gray-200 rounded-xl p-6 mb-6">
+        <div className="flex gap-8">
+          {/* Image */}
+          <div className="w-48 h-48 bg-gray-50 rounded-xl flex items-center justify-center border border-gray-200 flex-shrink-0">
+            <img
+              src={selectedAsset?.Image || `https://img.icons8.com/fluency/200/${
+                (selectedAsset?.Asset_Type || '').toLowerCase().includes('laptop') ? 'laptop' :
+                (selectedAsset?.Asset_Type || '').toLowerCase().includes('mobile') ? 'smartphone' :
+                (selectedAsset?.Asset_Type || '').toLowerCase().includes('monitor') ? 'monitor' :
+                (selectedAsset?.Asset_Type || '').toLowerCase().includes('printer') ? 'print' :
+                (selectedAsset?.Asset_Type || '').toLowerCase().includes('desktop') ? 'desktop' :
+                'electronics'
+              }.png`}
+              alt={selectedAsset?.Asset_Name}
+              className="max-h-40 max-w-40 object-contain"
+            />
+          </div>
+
+          {/* Details Grid */}
+          <div className="flex-1">
+            <div className="flex items-center gap-4 mb-4">
+              <div>
+                <p className="text-xs text-gray-500">Asset ID</p>
+                <p className="text-xl font-bold text-blue-600">{selectedAsset.Asset_ID}</p>
+              </div>
+              <span className={`px-3 py-1 rounded-full text-sm font-bold ${
+                selectedAsset.Status === 'Available' ? 'bg-green-100 text-green-700' :
+                selectedAsset.Status === 'In Use' ? 'bg-blue-100 text-blue-700' :
+                selectedAsset.Status === 'Under Repair' ? 'bg-amber-100 text-amber-700' :
+                'bg-red-100 text-red-700'
+              }`}>{selectedAsset.Status}</span>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div><p className="text-xs text-gray-500">Asset Name</p><p className="font-semibold text-gray-800">{selectedAsset.Asset_Name}</p></div>
+              <div><p className="text-xs text-gray-500">Category</p><p className="font-semibold text-gray-800">{selectedAsset.Asset_Type}</p></div>
+              <div><p className="text-xs text-gray-500">Serial No</p><p className="font-semibold text-gray-800">{selectedAsset.Serial_No}</p></div>
+              <div><p className="text-xs text-gray-500">Codal Life</p><p className="font-semibold text-gray-800">{selectedAsset.Codal_Life ? `${selectedAsset.Codal_Life} Years` : '-'}</p></div>
+              <div><p className="text-xs text-gray-500">Purchase Date</p><p className="font-semibold text-gray-800">{selectedAsset.Purchase_Date ? new Date(selectedAsset.Purchase_Date).toLocaleDateString() : '-'}</p></div>
+              <div><p className="text-xs text-gray-500">Warranty Expiry</p><p className="font-semibold text-gray-800">{selectedAsset.Warranty ? new Date(selectedAsset.Warranty).toLocaleDateString() : '-'}</p></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Tabs */}
+      {(() => {
+        //const [activeDetailTab, setActiveDetailTab] = useState('Assignment History')
+        const assetAssignments = assignments.filter(a => a.assetId === selectedAsset.Asset_ID)
+        const assetMaintenance = maintenanceRecords.filter(m => m.assetId === selectedAsset.Asset_ID)
+        return (
+          <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+            <div className="flex border-b border-gray-200">
+              {['Assignment History', 'Maintenance History', 'Activity Log'].map(tab => (
+                <button
+                  key={tab}
+                  onClick={() => setActiveDetailTab(tab)}
+                  className={`px-6 py-3 text-sm font-semibold transition-colors ${activeDetailTab === tab ? 'text-blue-600 border-b-2 border-blue-600' : 'text-gray-500 hover:text-gray-700'}`}
+                >
+                  {tab}
+                </button>
+              ))}
+            </div>
+            <div className="p-4">
+              {activeDetailTab === 'Assignment History' && (
+                <table className="w-full">
+                  <thead><tr className="text-left text-xs text-gray-500 uppercase">
+                    <th className="pb-3">Assigned To</th>
+                    <th className="pb-3">Assigned Date</th>
+                    <th className="pb-3">Returned Date</th>
+                    <th className="pb-3">Status</th>
+                  </tr></thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {assetAssignments.length === 0 ? (
+                      <tr><td colSpan={4} className="py-6 text-center text-sm text-gray-500">No assignment history</td></tr>
+                    ) : assetAssignments.map((a, i) => (
+                      <tr key={i}>
+                        <td className="py-3 text-sm font-semibold">{a.employee}</td>
+                        <td className="py-3 text-sm text-gray-600">{a.assignedDate}</td>
+                        <td className="py-3 text-sm text-gray-600">{a.returnDate || '-'}</td>
+                        <td className="py-3"><span className={`px-2 py-1 rounded text-xs font-bold ${a.status === 'Active' ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600'}`}>{a.status === 'Active' ? 'Current' : 'Returned'}</span></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+              {activeDetailTab === 'Maintenance History' && (
+                <table className="w-full">
+                  <thead><tr className="text-left text-xs text-gray-500 uppercase">
+                    <th className="pb-3">Issue</th>
+                    <th className="pb-3">Technician</th>
+                    <th className="pb-3">Date</th>
+                    <th className="pb-3">Status</th>
+                  </tr></thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {assetMaintenance.length === 0 ? (
+                      <tr><td colSpan={4} className="py-6 text-center text-sm text-gray-500">No maintenance history</td></tr>
+                    ) : assetMaintenance.map((m, i) => (
+                      <tr key={i}>
+                        <td className="py-3 text-sm font-semibold">{m.type}</td>
+                        <td className="py-3 text-sm text-gray-600">{m.technician}</td>
+                        <td className="py-3 text-sm text-gray-600">{m.serviceDate}</td>
+                        <td className="py-3"><span className={`px-2 py-1 rounded text-xs font-bold ${m.status === 'Completed' ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'}`}>{m.status}</span></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+              {activeDetailTab === 'Activity Log' && (
+                <div className="py-6 text-center text-sm text-gray-500">No activity log available</div>
+              )}
+            </div>
+          </div>
+        )
+      })()}
+    </div>
+  </div>
+)}
+                  {/* QR Code Modal */}
+                  {showQRModal && qrAsset && (
+                    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50" onClick={() => setShowQRModal(false)}>
+                      <div className="bg-white rounded-2xl w-full max-w-sm shadow-2xl text-center p-8" onClick={e => e.stopPropagation()}>
+                        <h3 className="text-lg font-bold text-gray-900 mb-4">QR Code — {qrAsset.Asset_ID}</h3>
+                        <img
+                          src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(
+  [
+    `Asset ID   : ${qrAsset.Asset_ID}`,
+    `Name       : ${qrAsset.Asset_Name}`,
+    `Type       : ${qrAsset.Asset_Type}`,
+    `Serial No  : ${qrAsset.Serial_No}`,
+    `Status     : ${qrAsset.Status}`,
+    `Purchase   : ${qrAsset.Purchase_Date ? new Date(qrAsset.Purchase_Date).toLocaleDateString() : '-'}`,
+    `Warranty   : ${qrAsset.Warranty ? new Date(qrAsset.Warranty).toLocaleDateString() : '-'}`,
+    `Assigned To: ${(() => { const a = assignments.find(x => x.assetId === qrAsset.Asset_ID); return a ? `${a.employee} (${a.department})` : 'Not Assigned' })()}`,
+  ].join('\n')
+)}`}
+                          alt="QR Code"
+                          className="mx-auto rounded-lg border border-gray-200"
+                        />
+                        <p className="text-sm text-gray-500 mt-3">{qrAsset.Asset_Name}</p>
+                        <button
+  onClick={async () => {
+    const url = `https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=${encodeURIComponent(
+  [
+    `Asset ID   : ${qrAsset.Asset_ID}`,
+    `Name       : ${qrAsset.Asset_Name}`,
+    `Type       : ${qrAsset.Asset_Type}`,
+    `Serial No  : ${qrAsset.Serial_No}`,
+    `Status     : ${qrAsset.Status}`,
+    `Purchase   : ${qrAsset.Purchase_Date ? new Date(qrAsset.Purchase_Date).toLocaleDateString() : '-'}`,
+    `Warranty   : ${qrAsset.Warranty ? new Date(qrAsset.Warranty).toLocaleDateString() : '-'}`,
+    `Assigned To: ${(() => { const a = assignments.find(x => x.assetId === qrAsset.Asset_ID); return a ? `${a.employee} (${a.department})` : 'Not Assigned' })()}`,
+  ].join('\n')
+)}`
+    const response = await fetch(url)
+    const blob = await response.blob()
+    const link = document.createElement('a')
+    link.href = URL.createObjectURL(blob)
+    link.download = `QR-${qrAsset.Asset_ID}.png`
+    link.click()
+    URL.revokeObjectURL(link.href)
+  }}
+  className="mt-4 inline-block px-5 py-2 rounded-lg text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700"
+>
+  Download QR
+</button>
+                      </div>
+                    </div>
+                  )}
+
+    {/* Assets Table */}
+    {(() => {
+      const q = assetsListSearch.trim().toLowerCase()
+      const filteredAssetsList = assets.filter(a =>
+        !q ||
+        (a.Asset_ID || '').toLowerCase().includes(q) ||
+        (a.Asset_Name || '').toLowerCase().includes(q)
+      )
+      return (
+        <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+  <table className="w-full">
+    <thead className="bg-gray-50 border-b border-gray-200">
+      <tr>
+        <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Asset ID</th>
+        <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Name</th>
+        <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Type</th>
+        <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Serial No</th>
+        <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Status</th>
+        <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Purchase Date</th>
+        <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Action</th>
+      </tr>
+    </thead>
+    <tbody className="divide-y divide-gray-100">
+      {assets
+        .filter(a => JSON.stringify(a).toLowerCase().includes(assetsListSearch.toLowerCase()))
+        .map(a => (
+          <tr key={a._id} className="hover:bg-gray-50 cursor-pointer transition-colors" onClick={() => { setSelectedAssetId(a.Asset_ID || a._id); setDetailsTab('Assignment History') }}>
+            <td className="px-6 py-4 text-sm font-semibold text-blue-600">{a.Asset_ID}</td>
+            <td className="px-6 py-4 text-sm font-semibold text-gray-800">{a.Asset_Name}</td>
+            <td className="px-6 py-4 text-sm text-gray-600">{a.Asset_Type}</td>
+            <td className="px-6 py-4 text-sm text-gray-600">{a.Serial_No}</td>
+            <td className="px-6 py-4">
+              <span className={`px-2.5 py-1 rounded-md text-xs font-bold border ${
+                a.Status === 'Available' ? 'bg-green-50 text-green-700 border-green-200' :
+                a.Status === 'In Use' ? 'bg-blue-50 text-blue-700 border-blue-200' :
+                a.Status === 'Under Repair' ? 'bg-amber-50 text-amber-700 border-amber-200' :
+                'bg-red-50 text-red-700 border-red-200'
+              }`}>{a.Status}</span>
+            </td>
+            <td className="px-6 py-4 text-sm text-gray-600">{a.Purchase_Date ? new Date(a.Purchase_Date).toLocaleDateString() : '-'}</td>
+            <td className="px-6 py-4">
+              <div className="flex items-center gap-2">
+                <button
+  onClick={(e) => {
+    e.stopPropagation()
+    setEditingAssetId(a._id)
+    setForm({
+      assetName: a.Asset_Name || '',
+      category: a.Asset_Type || '',
+      serialNumber: a.Serial_No || '',
+      modelNumber: '',
+      purchaseDate: a.Purchase_Date ? a.Purchase_Date.split('T')[0] : '',
+      purchasePrice: a.Purchase_Price ||'',
+      vendor: a.Vendor || '',
+      codalLife: a.Codal_Life || '',
+      warrantyExpiry: a.Warranty ? a.Warranty.split('T')[0] : '',
+      location: '',
+      description: '',
+    })
+    setImage(a.Image || null)
+    setShowAssetForm(true)
+  }}
+  title="Edit"
+  className="w-8 h-8 rounded-md bg-blue-500 hover:bg-blue-600 text-white flex items-center justify-center"
+>
+  <Pencil className="w-4 h-4" />
+</button>
+                <button
+                  onClick={(e) => { e.stopPropagation(); setQrAsset(a); setShowQRModal(true) }}
+                  title="Generate QR"
+                  className="w-8 h-8 rounded-md bg-green-500 hover:bg-green-600 text-white flex items-center justify-center"
+                >
+                  <QrIcon className="w-4 h-4" />
+                </button>
+                <button
+                  onClick={async (e) => { e.stopPropagation(); if(confirm('Delete this asset?')) { await fetch(`/api/assets/${a._id}`, { method: 'DELETE' }); setAssets(prev => prev.filter(x => x._id !== a._id)) }}}
+                  title="Delete"
+                  className="w-8 h-8 rounded-md bg-red-500 hover:bg-red-600 text-white flex items-center justify-center"
+                >
+                  <Trash2 className="w-4 h-4" />
+                </button>
+              </div>
+            </td>
+          </tr>
+        ))}
+    </tbody>
+  </table>
+</div>
+      )
+    })()}
+              </>
               ) : activeMenu === 'Employees' ? (
                 (() => {
                   const filtered = employees.filter((e) => {
@@ -2265,7 +2694,7 @@ function App() {
                             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
                             <input
                               type="text"
-                              value={empSearch}
+                              value={maintempSearch}
                               onChange={(e) => {
                                 setEmpSearch(e.target.value)
                                 setEmpPage(1)
@@ -2323,7 +2752,8 @@ function App() {
                                           <UserPlus className="w-4 h-4" />
                                         </button>
                                         <button
-                                          onClick={() => { if (confirm(`Delete ${emp.name}?`)) setEmployees(prev => prev.filter(e => e.id !== emp.id)) }}
+                                          onClick={async() => {if (confirm(`Delete ${emp.name}?`)) {await fetch(`/api/auth/${emp._id}`, { method: 'DELETE' })
+                                          setEmployees(prev => prev.filter(e => e.id !== emp.id))} }}
                                           title="Delete"
                                           className="w-8 h-8 rounded-md bg-red-500 hover:bg-red-600 text-white flex items-center justify-center transition-colors shadow-sm"
                                         >
@@ -2461,34 +2891,24 @@ function App() {
                 })()
               ) : activeMenu === 'Reports' ? (
                 (() => {
-                  const categoryData = [
-                    { label: 'Laptops', value: 540, color: '#3b82f6' },
-                    { label: 'Desktops', value: 320, color: '#22c55e' },
-                    { label: 'Printers', value: 150, color: '#f59e0b' },
-                    { label: 'SSD', value: 100, color: '#8b5cf6' },
-                    { label: 'Peripherals', value: 70, color: '#f97316' },
-                    { label: 'Others', value: 70, color: '#ef4444' },
-                  ]
-                  const statusData = [
-                    { label: 'Assigned', value: 945, color: '#22c55e' },
-                    { label: 'Available', value: 210, color: '#f59e0b' },
-                    { label: 'Maintenance', value: 95, color: '#ef4444' },
-                  ]
-                  const totalCat = categoryData.reduce((s, d) => s + d.value, 0)
-                  const totalStat = statusData.reduce((s, d) => s + d.value, 0)
-                  const stats = [
-                    { label: 'Total Assets', value: 1250, icon: Monitor, bg: 'bg-blue-100', color: 'text-blue-500' },
-                    { label: 'Assigned Assets', value: 945, icon: CheckSquare, bg: 'bg-emerald-100', color: 'text-emerald-500' },
-                    { label: 'Available Assets', value: 210, icon: Package, bg: 'bg-amber-100', color: 'text-amber-500' },
-                    { label: 'Under Maintenance', value: 95, icon: Wrench, bg: 'bg-red-100', color: 'text-red-500' },
-                  ]
+                  const repCatColors = ['#3b82f6','#22c55e','#f59e0b','#8b5cf6','#ef4444','#06b6d4','#f97316']
+const repCatCounts = {}
+assets.forEach(a => { const c = a.Asset_Type||a.category; if(c) repCatCounts[c]=(repCatCounts[c]||0)+1 })
+const categoryData = Object.entries(repCatCounts).map(([label,value],i) => ({ label, value, color: repCatColors[i%repCatColors.length] }))
+const totalCat = categoryData.reduce((s,d) => s+d.value, 0) || 1
+
+const statusData = [
+  { label: 'In Use', value: assets.filter(a=>a.Status==='In Use').length, color: '#22c55e' },
+  { label: 'Available', value: assets.filter(a=>a.Status==='Available').length, color: '#f59e0b' },
+  { label: 'Under Repair', value: assets.filter(a=>a.Status==='Under Repair').length, color: '#ef4444' },
+]
+const totalStat = statusData.reduce((s,d) => s+d.value, 0) || 1
+                 
+
                   const activities = [
-                    { icon: Droplet, color: 'text-blue-500', bg: 'bg-blue-100', text: 'Dell Laptop (A1001) assigned to John Doe', time: '10 min ago' },
-                    { icon: Printer, color: 'text-amber-500', bg: 'bg-amber-50', text: 'HP Printer (A1002) added to inventory', time: '1 hour ago' },
-                    { icon: RotateCw, color: 'text-red-500', bg: 'bg-red-100', text: 'Apple MacBook (A1003) returned/exited', time: '2 hours ago' },
-                    { icon: Wrench, color: 'text-purple-500', bg: 'bg-purple-100', text: 'Canon Scanner (A1010) sent for maintenance', time: '5 hours ago' },
-                    { icon: UserPlus, color: 'text-green-500', bg: 'bg-green-100', text: 'New employee Mary Smith (E1002) added', time: 'Yesterday' },
-                  ]
+  ...assignments.slice(0,3).map(a => ({ icon: UserPlus, color: 'text-blue-500', bg: 'bg-blue-100', text: `${a.assetName} assigned to ${a.employee}`, time: a.assignedDate })),
+  ...maintenanceRecords.slice(0,2).map(m => ({ icon: Wrench, color: 'text-red-500', bg: 'bg-red-100', text: `${m.assetName} sent for maintenance`, time: m.serviceDate || 'Recently' })),
+]
 
                   return (
                     <div key={reportGenerated} className="animate-in fade-in duration-300">
@@ -2662,7 +3082,10 @@ function App() {
                   }
 
                   const formatDate = (d) => {
+                    if (!d) return '-'
+                    const str = typeof d === 'string' ? d.split('T')[0] : new Date(d).toISOString().split('T')[0]
                     const parts = d.split('-')
+                    if (parts.length < 3) return str
                     return `${parts[2]}-${parts[1]}-${parts[0]}`
                   }
 
@@ -2677,7 +3100,7 @@ function App() {
                           </p>
                         </div>
                         <button
-                          onClick={() => { setMaintForm({ asset_id: '', technician_name: '', issue_description: '', remarks: '', cost: '' }); setMaintFormError(''); setMaintFormSuccess(''); setShowMaintenanceModal(true); }}
+                          onClick={() => { setMaintForm({ asset_id: '', asset_name: '', technician_name: '', issue_description: '', remarks: '', cost: '' }); setAssetSearch(''); setEmpSearchMaint(''); setAssetSuggestions([]); setEmpSuggestions([]); setMaintFormError(''); setMaintFormSuccess(''); setShowMaintenanceModal(true); }}
                           className="flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700 transition-colors shadow-sm"
                         >
                           <Plus className="w-4 h-4" />
@@ -2704,7 +3127,7 @@ function App() {
                             <tbody className="divide-y divide-gray-100">
                               {pageRows.map((m) => (
                                 <tr key={m.id} className="hover:bg-gray-50 transition-colors">
-                                  <td className="px-6 py-4 text-sm font-semibold text-blue-600">{m.id}</td>
+                                  <td className="px-6 py-4 text-sm font-semibold text-blue-600">{m.maintId ||m.id}</td>
                                   <td className="px-6 py-4 text-sm font-semibold text-blue-600">{m.assetId}</td>
                                   <td className="px-6 py-4 text-sm text-gray-800">{m.assetName}</td>
                                   <td className="px-6 py-4 text-sm text-gray-700">{m.type}</td>
@@ -2718,21 +3141,22 @@ function App() {
                                   <td className="px-6 py-4">
                                     <div className="flex items-center justify-center gap-2">
                                       <button
-                                        onClick={() => { setMaintForm({ asset_id: m.assetId, technician_name: '', issue_description: m.type, remarks: '', cost: '' }); setMaintFormError(''); setMaintFormSuccess(''); setShowMaintenanceModal(true); }}
+                                        onClick={() => {setMaintForm({ asset_id: m.assetId, asset_name: m.assetName, technician_name: '', issue_description: m.type, remarks: '', cost: '' }); setAssetSearch(m.assetName || ''); setEmpSearchMaint(''); setAssetSuggestions([]); setEmpSuggestions([])}}
                                         title="Edit"
                                         className="w-8 h-8 rounded-md bg-blue-500 hover:bg-blue-600 text-white flex items-center justify-center transition-colors shadow-sm"
                                       >
                                         <Pencil className="w-4 h-4" />
                                       </button>
                                       <button
-                                        onClick={() => { setMaintenanceRecords((prev) => prev.map((r) => r.id === m.id ? { ...r, status: 'Completed' } : r)) }}
+                                        onClick={() => { setMaintForm({ asset_id: m.assetId, asset_name: m.assetName, technician_name: '', issue_description: m.type, remarks: '', cost: '' }); setAssetSearch(m.assetName || ''); setEmpSearchMaint(''); setAssetSuggestions([]); setEmpSuggestions([]); setMaintFormError(''); setMaintFormSuccess(''); setShowMaintenanceModal(true); }}
                                         title="Mark Complete"
                                         className="w-8 h-8 rounded-md bg-green-500 hover:bg-green-600 text-white flex items-center justify-center transition-colors shadow-sm"
                                       >
                                         <Check className="w-4 h-4" />
                                       </button>
                                       <button
-                                        onClick={() => { if (confirm(`Delete ${m.id}?`)) setMaintenanceRecords((prev) => prev.filter((r) => r.id !== m.id)) }}
+                                        onClick={async() => { if (confirm(`Delete ${m.id}?`)) {await fetch(`/api/maintenance/${m.id}`, { method: 'DELETE' })
+                                        setMaintenanceRecords(prev => prev.filter(r => r.id !== m.id)) }}}
                                         title="Delete"
                                         className="w-8 h-8 rounded-md bg-red-500 hover:bg-red-600 text-white flex items-center justify-center transition-colors shadow-sm"
                                       >
@@ -2798,26 +3222,105 @@ function App() {
                               {maintFormSuccess && (
                                 <div className="p-3 rounded-lg bg-green-50 border border-green-200 text-sm text-green-700">{maintFormSuccess}</div>
                               )}
-                              <div>
-                                <label className="block text-sm font-semibold text-gray-700 mb-1">Asset ID <span className="text-red-500">*</span></label>
+                              {/* Asset Search */}
+                              <div className="relative">
+                                <label className="block text-sm font-semibold text-gray-700 mb-1">Search Asset <span className="text-red-500">*</span></label>
                                 <input
                                   type="text"
-                                  placeholder="e.g. A1004"
-                                  value={maintForm.asset_id}
-                                  onChange={(e) => setMaintForm((p) => ({ ...p, asset_id: e.target.value }))}
+                                  placeholder="Type asset name or serial..."
+                                  value={assetSearch}
+                                  onChange={(e) => {
+                                    const val = e.target.value
+                                    setAssetSearch(val)
+                                    if (val.trim().length === 0) {
+                                      setAssetSuggestions([])
+                                      setMaintForm(p => ({ ...p, asset_id: '', asset_name: '' }))
+                                      return
+                                    }
+                                    const filtered = assets.filter(a =>
+                                      (a.Asset_ID || '').toLowerCase().includes(val.toLowerCase()) ||
+                                      (a.Asset_Name || '').toLowerCase().includes(val.toLowerCase()) ||
+                                      (a.Serial_No || '').toLowerCase().includes(val.toLowerCase())
+                                    )
+                                    setAssetSuggestions(filtered.slice(0, 6))
+                                  }}
                                   className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                                 />
+                                {assetSuggestions.length > 0 && (
+                                  <div className="absolute z-50 w-full bg-white border border-gray-200 rounded-lg shadow-lg mt-1 max-h-48 overflow-y-auto">
+                                    {assetSuggestions.map(a => (
+                                      <div
+                                        key={a._id}
+                                        onClick={() => {
+                                          setAssetSearch(`${a.Asset_ID} — ${a.Asset_Name}`)
+                                          const assignedTo = assignments.find(assign => assign.assetId === a._id || assign.assetId === (a.Asset_ID || a._id))
+                                          const assignedEmp = assignedTo ? employees.find(e => e.id === assignedTo.empId || e.name === assignedTo.employee) : null
+                                          setMaintForm(p => ({ ...p, asset_id:a.Asset_ID ||a._id,asset_readable_id: a.Asset_ID || a._id, asset_name: a.Asset_Name || a.name,technician_name: assignedEmp ? assignedEmp.name : ''}))
+                                          if (assignedEmp) setMaintEmpSearch(assignedEmp.name)
+                                          else setMaintEmpSearch('')
+                                          setAssetSuggestions([])
+                                        }}
+                                        className="px-4 py-2 hover:bg-blue-50 cursor-pointer text-sm border-b border-gray-100 last:border-0"
+                                      >
+                                        <span className="font-semibold text-blue-600">{a.Asset_ID}</span>
+                                        <span className="text-gray-700 ml-2">{a.Asset_Name}</span>
+                                        <span className="text-gray-400 ml-2 text-xs">{a.Asset_Type} · {a.Serial_No}</span>
+                                        
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
+                                {maintForm.asset_id && (
+                                  <p className="text-xs text-green-600 mt-1">✓ Selected: {maintForm.asset_name}</p>
+                                )}
                               </div>
-                              <div>
-                                <label className="block text-sm font-semibold text-gray-700 mb-1">Technician Name <span className="text-red-500">*</span></label>
-                                <input
-                                  type="text"
-                                  placeholder="e.g. IT Helpdesk"
-                                  value={maintForm.technician_name}
-                                  onChange={(e) => setMaintForm((p) => ({ ...p, technician_name: e.target.value }))}
-                                  className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                                />
-                              </div>
+
+                             {/* Employee Search */}
+                             <div className="relative">
+                              <label className="block text-sm font-semibold text-gray-700 mb-1">Technician (Employee) <span className="text-red-500">*</span></label>
+                              <input
+                                type="text"
+                                placeholder="Type employee name..."
+                                value={maintempSearch}
+                                onChange={(e) => {
+                                  const val = e.target.value
+                                  setMaintEmpSearch(val)
+                                  if (val.trim().length === 0) {
+                                    setEmpSuggestions([])
+                                    setMaintForm(p => ({ ...p, technician_name: '' }))
+                                    return
+                                  }
+                                  const filtered = employees.filter(emp =>
+                                    (emp.name || '').toLowerCase().includes(val.toLowerCase()) ||
+                                    (emp.designation || '').toLowerCase().includes(val.toLowerCase()) ||
+                                    (emp.department || '').toLowerCase().includes(val.toLowerCase())
+                                  )
+                                  setEmpSuggestions(filtered.slice(0, 6))
+                                }}
+                                className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                              />
+                              {empSuggestions.length > 0 && (
+                                <div className="absolute z-50 w-full bg-white border border-gray-200 rounded-lg shadow-lg mt-1 max-h-48 overflow-y-auto">
+                                  {empSuggestions.map(emp => (
+                                    <div
+                                      key={emp._id}
+                                      onClick={() => {
+                                        setEmpSearchMaint(emp.name)
+                                        setMaintForm(p => ({ ...p, technician_name: emp.name }))
+                                        setEmpSuggestions([])
+                                      }}
+                                      className="px-4 py-2 hover:bg-blue-50 cursor-pointer text-sm border-b border-gray-100 last:border-0"
+                                    >
+                                      <span className="font-semibold text-gray-800">{emp.name}</span>
+                                      <span className="text-gray-400 ml-2 text-xs">{emp.designation} · {emp.department}</span>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                              {maintForm.technician_name && (
+                                <p className="text-xs text-green-600 mt-1">✓ Selected: {maintForm.technician_name}</p>
+                              )}
+                            </div>
                               <div>
                                 <label className="block text-sm font-semibold text-gray-700 mb-1">Issue Description <span className="text-red-500">*</span></label>
                                 <textarea
@@ -2872,7 +3375,8 @@ function App() {
                                       method: 'POST',
                                       headers: { 'Content-Type': 'application/json' },
                                       body: JSON.stringify({
-                                        asset_id: maintForm.asset_id,
+                                        asset_id: maintForm.asset_readable_id || maintForm.asset_id,
+                                        asset_name: maintForm.asset_name,
                                         technician_name: maintForm.technician_name,
                                         issue_description: maintForm.issue_description,
                                         remarks: maintForm.remarks,
@@ -2887,7 +3391,7 @@ function App() {
                                         {
                                           id: json.log?._id || `M${Date.now()}`,
                                           assetId: maintForm.asset_id,
-                                          assetName: maintForm.asset_id,
+                                          assetName: maintForm.asset_name,
                                           type: maintForm.issue_description,
                                           serviceDate: today,
                                           nextDue,
@@ -2906,8 +3410,8 @@ function App() {
                                     setMaintenanceRecords((prev) => [
                                       {
                                         id: `M${Date.now()}`,
-                                        assetId: maintForm.asset_id,
-                                        assetName: maintForm.asset_id,
+                                        assetId: maintForm.asset_name,
+                                        assetName: maintForm.asset_,
                                         type: maintForm.issue_description,
                                         serviceDate: today,
                                         nextDue,
@@ -3098,13 +3602,18 @@ function App() {
                 ) : (
                   /* Scanned Result */
                   (() => {
-                    const scanned = dummyAssets[scannedAssetIdx]
-                    const statusStyle =
-                      scanned.status === 'Assigned'
-                        ? 'bg-green-100 text-green-700 border-green-200'
-                        : scanned.status === 'Available'
-                        ? 'bg-amber-100 text-amber-700 border-amber-200'
-                        : 'bg-red-100 text-red-700 border-red-200'
+                    const scanned = typeof scannedAssetIdx === 'string' 
+  ? assets.find(a => a.Asset_ID === scannedAssetIdx) || assets[0]
+  : assets[scannedAssetIdx] || assets[0]
+console.log('SCANNED ASSET:', scanned?.Asset_ID, 'IMAGE:', scanned?.Image?.substring(0,20))
+const statusStyle =
+  (scanned?.Status || scanned?.status) === 'In Use'
+    ? 'bg-blue-100 text-blue-700 border-blue-200'
+    : (scanned?.Status || scanned?.status) === 'Available'
+    ? 'bg-green-100 text-green-700 border-green-200'
+    : (scanned?.Status || scanned?.status) === 'Under Repair'
+    ? 'bg-amber-100 text-amber-700 border-amber-200'
+    : 'bg-red-100 text-red-700 border-red-200'
                     return (
                       <div className="animate-in fade-in duration-500">
                         {/* Success Header */}
@@ -3114,20 +3623,29 @@ function App() {
                           </div>
                           <h2 className="text-2xl font-bold text-green-600">QR Code Scanned Successfully!</h2>
                           <p className="text-sm text-gray-600 mt-1">
-                            Asset ID: <span className="font-bold text-gray-900">{scanned.id}</span>
+                            Asset ID: <span className="font-bold text-gray-900">{scanned?.Asset_ID || scanned?.id}</span>
                           </p>
                         </div>
 
                         {/* Asset Card */}
                         <div className="bg-white border border-gray-200 rounded-xl p-6 grid grid-cols-1 md:grid-cols-2 gap-6">
                           <div className="flex items-center justify-center bg-gray-50 rounded-lg overflow-hidden p-4 min-h-[260px]">
-                            <img src={scanned.image} alt={scanned.name} className="max-h-[260px] object-contain" />
+                            <img src={scanned?.Image || `https://img.icons8.com/fluency/200/${
+  (scanned?.Asset_Type || '').toLowerCase().includes('laptop') ? 'laptop' :
+  (scanned?.Asset_Type || '').toLowerCase().includes('mobile') || (scanned?.Asset_Type || '').toLowerCase().includes('phone') ? 'smartphone' :
+  (scanned?.Asset_Type || '').toLowerCase().includes('monitor') ? 'monitor' :
+  (scanned?.Asset_Type || '').toLowerCase().includes('printer') ? 'print' :
+  (scanned?.Asset_Type || '').toLowerCase().includes('tablet') ? 'tablet' :
+  (scanned?.Asset_Type || '').toLowerCase().includes('camera') ? 'camera' :
+  (scanned?.Asset_Type || '').toLowerCase().includes('desktop') ? 'desktop' :
+  'electronics'
+}.png`} alt={scanned?.Asset_Name} className="max-h-[260px] object-contain" />
                           </div>
                           <div className="space-y-4">
                             {[
-                              ['Asset Name', scanned.name],
-                              ['Category', scanned.category],
-                              ['Serial Number', scanned.serial],
+                              ['Asset Name', scanned?.Asset_Name || scanned?.name],
+                              ['Category', scanned?.Asset_Type || scanned?.category],
+                              ['Serial Number', scanned?.Serial_No || scanned?.serial],
                             ].map(([k, v]) => (
                               <div key={k} className="grid grid-cols-2 gap-2">
                                 <span className="text-sm text-gray-500">{k}</span>
@@ -3138,17 +3656,27 @@ function App() {
                               <span className="text-sm text-gray-500">Status</span>
                               <span>
                                 <span className={`inline-flex px-2.5 py-1 rounded-md text-xs font-semibold border ${statusStyle}`}>
-                                  {scanned.status}
+                                  {scanned?.Status ||scanned?.status}
                                 </span>
                               </span>
                             </div>
                             <div className="grid grid-cols-2 gap-2">
                               <span className="text-sm text-gray-500">Assigned To</span>
-                              <span className="text-sm font-semibold text-gray-900">{scanned.assignedTo}</span>
+<span className="text-sm font-semibold text-gray-900">
+  {(() => {
+    const assignment = assignments.find(x => x.assetId === scanned?.Asset_ID)
+    return assignment ? assignment.employee : 'Not Assigned'
+  })()}
+</span>
                             </div>
                             <div className="grid grid-cols-2 gap-2">
-                              <span className="text-sm text-gray-500">Location</span>
-                              <span className="text-sm font-semibold text-gray-900">{scanned.location}</span>
+                              <span className="text-sm text-gray-500">Department</span>
+<span className="text-sm font-semibold text-gray-900">
+  {(() => {
+    const assignment = assignments.find(x => x.assetId === scanned?.Asset_ID)
+    return assignment ? assignment.department : '-'
+  })()}
+</span>
                             </div>
                           </div>
                         </div>
@@ -3533,39 +4061,47 @@ function App() {
                 })()
               ) : activeMenu === 'Dashboard' ? (
                 (() => {
-                  const stats = [
-                    { label: 'Total Assets', value: 1245, percentLabel: 'View all assets', sub: 'arrow', icon: Monitor, color: 'text-blue-500', bg: 'bg-blue-100', trend: 5.2, trendUp: true, onClick: () => setActiveMenu('Assets') },
-                    { label: 'Assigned Assets', value: 945, percentLabel: '75.90% of total', sub: 'percent', icon: CheckSquare, color: 'text-emerald-500', bg: 'bg-emerald-100', trend: 3.4, trendUp: true, percentColor: 'text-emerald-600' },
-                    { label: 'Available Assets', value: 210, percentLabel: '16.87% of total', sub: 'percent', icon: Package, color: 'text-amber-500', bg: 'bg-amber-100', trend: 1.1, trendUp: false, percentColor: 'text-amber-600' },
-                    { label: 'Under Maintenance', value: 90, percentLabel: '7.23% of total', sub: 'percent', icon: Wrench, color: 'text-red-500', bg: 'bg-red-100', trend: 0.8, trendUp: true, percentColor: 'text-red-600' },
-                  ]
-                  const totalCatVal = 540 + 320 + 150 + 120 + 115
-                  const categoryData = [
-                    { label: 'Laptops', value: 540, color: '#3b82f6' },
-                    { label: 'Desktops', value: 320, color: '#22c55e' },
-                    { label: 'Printers', value: 150, color: '#f59e0b' },
-                    { label: 'Monitors', value: 120, color: '#8b5cf6' },
-                    { label: 'Others', value: 115, color: '#ef4444' },
-                  ]
+                  const totalAssets = assets.length
+const assignedAssets = assets.filter(a => a.Status === 'In Use').length
+const availableAssets = assets.filter(a => a.Status === 'Available').length
+const underMaintenance = assets.filter(a => a.Status === 'Under Repair').length
+
+const stats = [
+  { label: 'Total Assets', value: totalAssets, percentLabel: 'View all assets', sub: 'arrow', icon: Monitor, color: 'text-blue-500', bg: 'bg-blue-100', trend: 5.2, trendUp: true, onClick: () => setActiveMenu('Assets') },
+  { label: 'Assigned Assets', value: assignedAssets, percentLabel: `${totalAssets ? ((assignedAssets/totalAssets)*100).toFixed(1) : 0}% of total`, sub: 'percent', icon: CheckSquare, color: 'text-emerald-500', bg: 'bg-emerald-100', trend: 3.4, trendUp: true, percentColor: 'text-emerald-600' },
+  { label: 'Available Assets', value: availableAssets, percentLabel: `${totalAssets ? ((availableAssets/totalAssets)*100).toFixed(1) : 0}% of total`, sub: 'percent', icon: Package, color: 'text-amber-500', bg: 'bg-amber-100', trend: 1.1, trendUp: false, percentColor: 'text-amber-600' },
+  { label: 'Under Maintenance', value: underMaintenance, percentLabel: `${totalAssets ? ((underMaintenance/totalAssets)*100).toFixed(1) : 0}% of total`, sub: 'percent', icon: Wrench, color: 'text-red-500', bg: 'bg-red-100', trend: 0.8, trendUp: true, percentColor: 'text-red-600' },
+]
+                  const catColors = ['#3b82f6','#22c55e','#f59e0b','#8b5cf6','#ef4444','#06b6d4','#f97316','#ec4899']
+const catCounts = {}
+assets.forEach(a => { const c = a.Asset_Type || a.category; if(c) catCounts[c] = (catCounts[c]||0)+1 })
+const categoryData = Object.entries(catCounts).map(([label, value], i) => ({ label, value, color: catColors[i % catColors.length] }))
+const totalCatVal = categoryData.reduce((s,d) => s+d.value, 0) || 1
                   const statusData = [
-                    { label: 'Assigned', value: 945, color: '#22c55e' },
-                    { label: 'Available', value: 210, color: '#f59e0b' },
-                    { label: 'Maintenance', value: 90, color: '#ef4444' },
-                  ]
+  { label: 'In Use', value: assignedAssets, color: '#22c55e' },
+  { label: 'Available', value: availableAssets, color: '#f59e0b' },
+  { label: 'Under Repair', value: underMaintenance, color: '#ef4444' },
+]
                   const recentActivity = [
-                    { icon: User, bg: 'bg-blue-100', color: 'text-blue-500', text: 'Dell Laptop (A1001) assigned to John Doe', time: '2 minutes ago' },
-                    { icon: Printer, bg: 'bg-emerald-100', color: 'text-emerald-500', text: 'HP Printer (P2002) added to inventory', time: '15 minutes ago' },
-                    { icon: RotateCw, bg: 'bg-cyan-100', color: 'text-cyan-500', text: 'Apple MacBook (A1003) returned by Mary Smith', time: '1 hour ago' },
-                    { icon: Wrench, bg: 'bg-red-100', color: 'text-red-500', text: 'Logitech Mouse (A1004) under maintenance', time: '2 hours ago' },
-                    { icon: FolderKanban, bg: 'bg-amber-100', color: 'text-amber-500', text: "New asset category 'Projectors' added", time: '3 hours ago' },
-                  ]
-                  const recentAssets = [
-                    { id: 'A1001', name: 'Dell Latitude 5440', category: 'Laptop', serial: 'DL5440X123456', status: 'Assigned', assignedTo: 'John Doe' },
-                    { id: 'P2002', name: 'HP LaserJet Pro', category: 'Printer', serial: 'HPLJ123789', status: 'Available', assignedTo: '-' },
-                    { id: 'A1003', name: 'Apple MacBook Air', category: 'Laptop', serial: 'MBA2023X456', status: 'Assigned', assignedTo: 'Mary Smith' },
-                    { id: 'M3001', name: 'Samsung 24" Monitor', category: 'Monitor', serial: 'SM24F450X789', status: 'Maintenance', assignedTo: '-' },
-                    { id: 'A1004', name: 'Logitech Wireless Mouse', category: 'Accessory', serial: 'LOGMOU123456', status: 'Available', assignedTo: '-' },
-                  ]
+  ...assignments.slice(0, 3).map(a => ({
+    icon: UserPlus, bg: 'bg-blue-100', color: 'text-blue-500',
+    text: `${a.assetName} (${a.assetId}) assigned to ${a.employee}`,
+    time: a.assignedDate
+  })),
+  ...maintenanceRecords.slice(0, 2).map(m => ({
+    icon: Wrench, bg: 'bg-red-100', color: 'text-red-500',
+    text: `${m.assetName} (${m.assetId}) sent for maintenance`,
+    time: m.serviceDate || 'Recently'
+  })),
+]
+                  const recentAssets = assets.slice(0, 5).map(a => ({
+  id: a.Asset_ID,
+  name: a.Asset_Name,
+  category: a.Asset_Type,
+  serial: a.Serial_No,
+  status: a.Status,
+  assignedTo: assignments.find(x => x.assetId === a.Asset_ID)?.employee || '-'
+}))
                   const monthlyData = [
                     { month: 'Jan', value: 85 }, { month: 'Feb', value: 110 },
                     { month: 'Mar', value: 95 }, { month: 'Apr', value: 140 },
@@ -3575,18 +4111,28 @@ function App() {
                     { month: 'Nov', value: 210 }, { month: 'Dec', value: 245 },
                   ]
                   const maxMonth = Math.max(...monthlyData.map(m => m.value))
-                  const alerts = [
-                    { icon: AlertTriangle, color: 'text-amber-600', bg: 'bg-amber-50', border: 'border-amber-200', title: '12 warranties expiring this month', desc: 'Review warranty details to avoid disruption' },
-                    { icon: Wrench, color: 'text-red-600', bg: 'bg-red-50', border: 'border-red-200', title: '5 maintenance tasks overdue', desc: 'Action required to keep assets operational' },
-                    { icon: Clock, color: 'text-blue-600', bg: 'bg-blue-50', border: 'border-blue-200', title: '8 assets pending assignment', desc: 'New hires waiting for equipment allocation' },
-                  ]
-                  const topDepts = [
-                    { name: 'IT Department', count: 425, percent: 34 },
-                    { name: 'Finance', count: 215, percent: 17 },
-                    { name: 'Marketing', count: 180, percent: 14 },
-                    { name: 'HR Department', count: 145, percent: 12 },
-                    { name: 'Sales', count: 130, percent: 10 },
-                  ]
+                  const now = new Date()
+const thirtyDaysLater = new Date(now.getTime() + 30*24*60*60*1000)
+const warrantyExpiring = assets.filter(a => {
+  if (!a.Warranty) return false
+  const w = new Date(a.Warranty)
+  return w >= now && w <= thirtyDaysLater
+}).length
+const overdueReturns = assignments.filter(a => a.status === 'Overdue').length
+const pendingAssign = assets.filter(a => a.Status === 'Available').length
+
+const alerts = [
+  { icon: AlertTriangle, color: 'text-amber-600', bg: 'bg-amber-50', border: 'border-amber-200', title: `${warrantyExpiring} warranties expiring this month`, desc: 'Review warranty details to avoid disruption' },
+  { icon: Wrench, color: 'text-red-600', bg: 'bg-red-50', border: 'border-red-200', title: `${maintenanceRecords.filter(m=>m.status==='In Progress').length} maintenance tasks in progress`, desc: 'Action required to keep assets operational' },
+  { icon: Clock, color: 'text-blue-600', bg: 'bg-blue-50', border: 'border-blue-200', title: `${pendingAssign} assets available for assignment`, desc: 'Assets in stock ready to be assigned' },
+]
+                  const deptCounts = {}
+employees.forEach(e => { const d = e.department; if(d) deptCounts[d] = (deptCounts[d]||0)+1 })
+const maxDept = Math.max(...Object.values(deptCounts), 1)
+const topDepts = Object.entries(deptCounts)
+  .sort((a,b) => b[1]-a[1])
+  .slice(0,5)
+  .map(([name, count]) => ({ name, count, percent: Math.round((count/maxDept)*40) }))
                   const statusBadgeCls = (s) =>
                     s === 'Assigned' ? 'bg-green-100 text-green-700 border-green-200'
                     : s === 'Available' ? 'bg-amber-100 text-amber-700 border-amber-200'
@@ -3837,15 +4383,15 @@ function App() {
                                   <td className="px-6 py-4 text-sm text-gray-700">{a.assignedTo}</td>
                                   <td className="px-6 py-4">
                                     <div className="flex items-center justify-center gap-2">
-                                      <button onClick={() => alert(`Edit ${a.id}`)} title="Edit" className="w-8 h-8 rounded-md bg-blue-500 hover:bg-blue-600 text-white flex items-center justify-center transition-colors shadow-sm">
-                                        <Pencil className="w-4 h-4" />
-                                      </button>
-                                      <button onClick={() => { setActiveMenu('QR Code Scanner'); resetScan() }} title="View QR" className="w-8 h-8 rounded-md bg-green-500 hover:bg-green-600 text-white flex items-center justify-center transition-colors shadow-sm">
-                                        <QrIcon className="w-4 h-4" />
-                                      </button>
-                                      <button onClick={() => { if (confirm(`Delete ${a.id}?`)) alert('Deleted (demo)') }} title="Delete" className="w-8 h-8 rounded-md bg-red-500 hover:bg-red-600 text-white flex items-center justify-center transition-colors shadow-sm">
-                                        <Trash2 className="w-4 h-4" />
-                                      </button>
+                                      <button onClick={() => { const fullAsset = assets.find(x => x.Asset_ID === a.id); if(fullAsset){setEditingAssetId(fullAsset._id); setForm({ assetName: fullAsset.Asset_Name||'', category: fullAsset.Asset_Type||'', serialNumber: fullAsset.Serial_No||'', modelNumber:'', purchaseDate: fullAsset.Purchase_Date?fullAsset.Purchase_Date.split('T')[0]:'', purchasePrice: fullAsset.Purchase_Price||'', vendor: fullAsset.Vendor||'', codalLife: fullAsset.Codal_Life||'', warrantyExpiry: fullAsset.Warranty?fullAsset.Warranty.split('T')[0]:'', location:'', description:'' }); setImage(fullAsset.Image||null); setShowAssetForm(true)} }} title="Edit" className="w-8 h-8 rounded-md bg-blue-500 hover:bg-blue-600 text-white flex items-center justify-center transition-colors shadow-sm">
+  <Pencil className="w-4 h-4" />
+</button>
+<button onClick={() => { const fullAsset = assets.find(x => x.Asset_ID === a.id); if(fullAsset){setQrAsset(fullAsset); setShowQRModal(true)} }} title="View QR" className="w-8 h-8 rounded-md bg-green-500 hover:bg-green-600 text-white flex items-center justify-center transition-colors shadow-sm">
+  <QrIcon className="w-4 h-4" />
+</button>
+<button onClick={async() => { if(confirm(`Delete ${a.id}?`)){await fetch(`/api/assets/${assets.find(x=>x.Asset_ID===a.id)?._id}`,{method:'DELETE'}); setAssets(prev=>prev.filter(x=>x.Asset_ID!==a.id))} }} title="Delete" className="w-8 h-8 rounded-md bg-red-500 hover:bg-red-600 text-white flex items-center justify-center transition-colors shadow-sm">
+  <Trash2 className="w-4 h-4" />
+</button>
                                     </div>
                                   </td>
                                 </tr>
@@ -4344,19 +4890,26 @@ function App() {
                 })()
               ) : activeMenu === 'Vendors' ? (
                 (() => {
+                  const getVendorAssetCount = (vendorName) =>
+                    assets.filter(a => a.Vendor === vendorName).length
+                  const getVendorSpend = (vendorName) =>
+                    assets
+                      .filter(a => a.Vendor === vendorName)
+                      .reduce((sum, a) => sum + (a.Purchase_Price || 0), 0)
                   const filtered = vendors.filter((v) => {
                     const inFilter = vendorFilter === 'All' || v.status === vendorFilter || v.category === vendorFilter
                     const q = vendorSearch.toLowerCase()
                     const inSearch = !q || v.name.toLowerCase().includes(q) || v.contact.toLowerCase().includes(q) || v.email.toLowerCase().includes(q) || v.city.toLowerCase().includes(q)
                     return inFilter && inSearch
                   })
-                  const totalSpend = vendors.reduce((s, v) => s + v.totalSpend, 0)
-                  const topVendor = vendors.length ? [...vendors].sort((a, b) => b.totalSpend - a.totalSpend)[0] : { name: 'N/A', totalSpend: 0 }
+                  const totalSpend = assets.reduce((s, a) => s + (a.Purchase_Price || 0), 0)
+                  const topVendor = vendors.length ? [...vendors].sort((a, b) => getVendorSpend(b.name) - getVendorSpend(a.name))[0] : { name: 'N/A', totalSpend: 0 }
                   const stats = [
+                    { label: 'Top Vendor', value: topVendor.name.split(' ')[0], icon: TrendingUp, color: 'text-purple-500', bg: 'bg-purple-100', sub: `₹${getVendorSpend(topVendor.name).toLocaleString('en-IN')}` },
                     { label: 'Total Vendors', value: vendors.length, icon: Truck, color: 'text-blue-500', bg: 'bg-blue-100' },
                     { label: 'Active', value: vendors.filter(v => v.status === 'Active').length, icon: CheckCircle2, color: 'text-emerald-500', bg: 'bg-emerald-100' },
                     { label: 'Total Spend', value: `₹${(totalSpend / 100000).toFixed(1)}L`, icon: Package, color: 'text-amber-500', bg: 'bg-amber-100' },
-                    { label: 'Top Vendor', value: topVendor.name.split(' ')[0], icon: TrendingUp, color: 'text-purple-500', bg: 'bg-purple-100', sub: `₹${topVendor.totalSpend.toLocaleString('en-IN')}` },
+                    //{ label: 'Top Vendor', value: topVendor.name.split(' ')[0], icon: TrendingUp, color: 'text-purple-500', bg: 'bg-purple-100', sub: `₹${topVendor.totalSpend.toLocaleString('en-IN')}` },
                   ]
                   const filters = ['All', 'Active', 'Inactive', 'Hardware', 'Software', 'Services']
                   const vendorAccent = (id) => {
@@ -4484,7 +5037,7 @@ function App() {
                                 <div className="grid grid-cols-2 gap-2 mt-4 pt-4 border-t border-gray-100">
                                   <div>
                                     <p className="text-[10px] text-gray-500 uppercase font-semibold tracking-wider">Assets</p>
-                                    <p className="text-base font-bold text-gray-900">{v.assetsCount}</p>
+                                    <p className="text-base font-bold text-gray-900">{getVendorAssetCount(v.name)}</p>
                                   </div>
                                   <div className="text-right">
                                     <p className="text-[10px] text-gray-500 uppercase font-semibold tracking-wider">Total Spend</p>
@@ -4540,7 +5093,7 @@ function App() {
                                     </td>
                                     <td className="px-6 py-4 text-sm text-gray-700">{v.category}</td>
                                     <td className="px-6 py-4 text-sm text-gray-700">{v.city}</td>
-                                    <td className="px-6 py-4 text-sm font-bold text-gray-900">{v.assetsCount}</td>
+                                    <td className="px-6 py-4 text-sm font-bold text-gray-900">{getVendorAssetCount(v.name)}</td>
                                     <td className="px-6 py-4 text-sm font-bold text-blue-600">₹{v.totalSpend.toLocaleString('en-IN')}</td>
                                     <td className="px-6 py-4"><Stars rating={v.rating} /></td>
                                     <td className="px-6 py-4">
@@ -4611,10 +5164,7 @@ function App() {
                                 <div className="space-y-3">
                                   <h4 className="text-xs font-bold text-gray-600 uppercase tracking-wider">Performance</h4>
                                   <div className="grid grid-cols-2 gap-3">
-                                    <div className="p-3 rounded-lg bg-blue-50 border border-blue-100">
-                                      <p className="text-xs text-gray-600">Assets Supplied</p>
-                                      <p className="text-xl font-bold text-blue-700 mt-1">{selectedVendor.assetsCount}</p>
-                                    </div>
+                                    <p className="text-xl font-bold text-blue-700 mt-1">{getVendorAssetCount(selectedVendor.name)}</p>
                                     <div className="p-3 rounded-lg bg-emerald-50 border border-emerald-100">
                                       <p className="text-xs text-gray-600">Total Spend</p>
                                       <p className="text-xl font-bold text-emerald-700 mt-1">₹{selectedVendor.totalSpend.toLocaleString('en-IN')}</p>
@@ -4633,28 +5183,28 @@ function App() {
 
                               {/* Assets supplied */}
                               <div className="mt-6">
-                                <h4 className="text-xs font-bold text-gray-600 uppercase tracking-wider mb-3">Assets Supplied ({selectedVendor.assetsCount})</h4>
-                                {selectedVendor.assetsCount === 0 ? (
-                                  <p className="text-sm text-gray-500 italic">No assets currently supplied by this vendor.</p>
-                                ) : (
-                                  <div className="space-y-2 max-h-44 overflow-y-auto">
-                                    {assets.filter(a => a.vendor === selectedVendor.name).map(a => (
-                                      <button
-                                        key={a.id}
-                                        onClick={() => { setSelectedAssetId(a.id); setDetailsTab('Assignment History'); setSelectedVendor(null) }}
-                                        className="w-full flex items-center gap-3 p-2.5 rounded-lg border border-gray-200 hover:border-blue-300 hover:bg-blue-50/40 transition-colors text-left"
-                                      >
-                                        <img src={a.image} alt={a.name} className="w-10 h-10 rounded-md object-cover flex-shrink-0" />
-                                        <div className="flex-1 min-w-0">
-                                          <p className="text-sm font-semibold text-gray-800 truncate">{a.name}</p>
-                                          <p className="text-xs text-gray-500">{a.id} · {a.category}</p>
-                                        </div>
-                                        <ArrowRight className="w-4 h-4 text-gray-400 flex-shrink-0" />
-                                      </button>
-                                    ))}
-                                  </div>
-                                )}
-                              </div>
+  <h4 className="text-xs font-bold text-gray-600 uppercase tracking-wider mb-3">Assets Supplied ({getVendorAssetCount(selectedVendor.name)})</h4>
+  {getVendorAssetCount(selectedVendor.name) === 0 ? (
+    <p className="text-sm text-gray-500 italic">No assets currently supplied by this vendor.</p>
+  ) : (
+    <div className="space-y-2 max-h-44 overflow-y-auto">
+      {assets.filter(a => a.Vendor === selectedVendor.name).map(a => (
+        <button
+          key={a._id}
+          onClick={() => { setSelectedAssetId(a.Asset_ID); setDetailsTab('Assignment History'); setSelectedVendor(null) }}
+          className="w-full flex items-center gap-3 p-2.5 rounded-lg border border-gray-200 hover:border-blue-300 hover:bg-blue-50/40 transition-colors text-left"
+        >
+          <img src={a.Image} alt={a.Asset_Name} className="w-10 h-10 rounded-md object-cover flex-shrink-0" />
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-semibold text-gray-800 truncate">{a.Asset_Name}</p>
+            <p className="text-xs text-gray-500">{a.Asset_ID} · {a.Asset_Type}</p>
+          </div>
+          <ArrowRight className="w-4 h-4 text-gray-400 flex-shrink-0" />
+        </button>
+      ))}
+    </div>
+  )}
+</div>
                             </div>
                             <div className="flex justify-end gap-3 px-6 py-4 border-t border-gray-100 bg-gray-50">
                               <button onClick={() => setSelectedVendor(null)} className="px-5 py-2 rounded-lg text-sm font-semibold text-gray-700 bg-white border border-gray-300 hover:bg-gray-100 transition-colors">
@@ -5105,14 +5655,35 @@ function App() {
                     if (!asset || !emp) return
                     const today = new Date().toLocaleDateString('en-GB').replace(/\//g,'-')
                     const retDate = newAssign.returnDate ? new Date(newAssign.returnDate).toLocaleDateString('en-GB').replace(/\//g,'-') : '-'
-                    const newId = 'AS' + String(Math.max(...assignments.map(x => parseInt(x.id.replace('AS',''))||0)) + 1).padStart(4,'0')
-                    const newRec = { id: newId, assetId: asset._id, assetName: asset.name, empId: emp._id, employee: emp.name, department: emp.department, assignedDate: today, returnDate: retDate, status: 'Active' }
+                    const newId = `ASN-${String(assignments.length + 1).padStart(3,'0')}`
+                    const newRec = {
+                      id: newId,
+                      assetId: asset.Asset_ID || asset._id,
+                      assetName: asset.Asset_Name || asset.name,
+                      empId: emp.empId || emp.id || emp._id,
+                      employee: emp.name,
+                      department: emp.department,
+                      assignedDate: today,
+                      returnDate: retDate,
+                      status: 'Active'
+                    }
                     setAssignments(prev => [newRec, ...prev])
-                    setAssets(prev => prev.map(a => a._id === asset._id ? { ...a, status: 'Assigned', assignedTo: emp.name } : a))
-                    await saveToDb('assignments', newRec)
-                    await updateInDb('assets', asset._id, { status: 'Assigned', assignedTo: emp.name })
-                    setShowAssignModal(false)
-                    setNewAssign({ assetId: '', empId: '', returnDate: '' })
+                    setAssets(prev => prev.map(a => a._id === asset._id ? { ...a, Status: 'In Use', assignedTo: emp.name } : a))
+                    // Save to backend
+                    try {
+                      await fetch('/api/assignments', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify(newRec)
+                    })
+                    await fetch(`/api/assets/${asset._id}`, {
+                      method: 'PUT',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ Status: 'In Use', assignedTo: emp.name })
+                    })
+                  } catch(e) {
+                    console.error('Save assignment error:', e)
+                  }
                   }
 
                   return (
@@ -5288,32 +5859,102 @@ function App() {
                           <div className="bg-white rounded-2xl w-full max-w-lg shadow-2xl animate-in zoom-in-95 duration-200" onClick={(e) => e.stopPropagation()}>
                             <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
                               <h3 className="text-lg font-bold text-gray-900">Assign New Asset</h3>
-                              <button onClick={() => setShowAssignModal(false)} className="w-8 h-8 rounded-full hover:bg-gray-100 flex items-center justify-center transition-colors text-gray-500">✕</button>
+                              <button onClick={() => {setShowAssignModal(false); setAssignAssetSearch(''); setAssignAssetSuggestions([]); setAssignEmpSearch(''); setAssignEmpSuggestions([]) }}  className="w-8 h-8 rounded-full hover:bg-gray-100 flex items-center justify-center transition-colors text-gray-500">✕</button>
                             </div>
                             <div className="p-6 space-y-4">
                               <div>
-                                <label className="block text-sm font-semibold text-gray-800 mb-1.5">Select Asset <span className="text-red-500">*</span></label>
+                                <label className="block text-sm font-semibold text-gray-800 mb-1.5">Search Asset by ID <span className="text-red-500">*</span></label>
                                 <div className="relative">
-                                  <select value={newAssign.assetId} onChange={(e) => setNewAssign({ ...newAssign, assetId: e.target.value })} className="w-full px-3.5 py-2.5 border border-gray-300 rounded-lg text-sm bg-white appearance-none focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-700 pr-10">
-                                    <option value="">Choose available asset</option>
-                                    {assets.filter(a => a.status === 'Available').map(a => (
-                                      <option key={a._id} value={a._id}>{a.id} — {a.name} ({a.category})</option>
-                                    ))}
-                                  </select>
-                                  <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500 pointer-events-none" />
+                                  <input
+                                    type="text"
+                                    placeholder="Type AST-001 or asset name..."
+                                    value={assignAssetSearch}
+                                    onChange={(e) => {
+                                      const val = e.target.value
+                                      setAssignAssetSearch(val)
+                                      setNewAssign(p => ({ ...p, assetId: '' }))
+                                      if (val.trim().length === 0) {
+                                        setAssignAssetSuggestions([])
+                                        return
+                                      }
+                                      const filtered = assets.filter(a =>
+                                        ((a.Asset_ID || '').toLowerCase().includes(val.toLowerCase()) ||
+                                        (a.Asset_Name || '').toLowerCase().includes(val.toLowerCase()) ||
+                                        (a.Serial_No || '').toLowerCase().includes(val.toLowerCase())) &&
+                                        (!a.Status || a.Status === 'Available')
+                                      )
+                                      setAssignAssetSuggestions(filtered.slice(0, 6))
+                                    }}
+                                    className="w-full px-3.5 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-700"
+                                  />
+                                  {assignAssetSuggestions.length > 0 && (
+                                    <div className="absolute z-50 w-full bg-white border border-gray-200 rounded-lg shadow-lg mt-1 max-h-48 overflow-y-auto">
+                                      {assignAssetSuggestions.map(a => (
+                                      <div
+                                          key={a._id}
+                                          onClick={() => {
+                                            setNewAssign(p => ({ ...p, assetId: a._id }))
+                                            setAssignAssetSearch(`${a.Asset_ID} — ${a.Asset_Name}`)
+                                            setAssignAssetSuggestions([])
+                                          }}
+                                          className="px-4 py-2 hover:bg-blue-50 cursor-pointer text-sm border-b border-gray-100 last:border-0"
+                                        >
+                                        <span className="font-semibold text-blue-600">{a.Asset_ID}</span>
+                                          <span className="text-gray-700 ml-2">{a.Asset_Name}</span>
+                                        <span className="text-gray-400 ml-2 text-xs">{a.Asset_Type} · {a.Serial_No}</span>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  )}
+                                  {newAssign.assetId && (
+                                    <p className="text-xs text-green-600 mt-1">✓ Asset selected</p>
+                                  )}
                                 </div>
                               </div>
                               <div>
-                                <label className="block text-sm font-semibold text-gray-800 mb-1.5">Select Employee <span className="text-red-500">*</span></label>
-                                <div className="relative">
-                                  <select value={newAssign.empId} onChange={(e) => setNewAssign({ ...newAssign, empId: e.target.value })} className="w-full px-3.5 py-2.5 border border-gray-300 rounded-lg text-sm bg-white appearance-none focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-700 pr-10">
-                                    <option value="">Choose employee</option>
-                                    {employees.map(e => (
-                                      <option key={e._id} value={e._id}>{e.id} — {e.name} ({e.department})</option>
-                                    ))}
-                                  </select>
-                                  <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500 pointer-events-none" />
-                                </div>
+                                <label className="block text-sm font-semibold text-gray-800 mb-1.5">Search Employee <span className="text-red-500">*</span></label>
+<div className="relative">
+  <input
+    type="text"
+    placeholder="Type employee name or ID..."
+    value={assignEmpSearch}
+    onChange={(e) => {
+      const val = e.target.value
+      setAssignEmpSearch(val)
+      setNewAssign(p => ({ ...p, empId: '' }))
+      if (val.trim().length === 0) { setAssignEmpSuggestions([]); return }
+      const filtered = employees.filter(emp =>
+        (emp.name || '').toLowerCase().includes(val.toLowerCase()) ||
+        (emp.empId || emp.id || '').toLowerCase().includes(val.toLowerCase()) ||
+        (emp.department || '').toLowerCase().includes(val.toLowerCase())
+      )
+      setAssignEmpSuggestions(filtered.slice(0, 6))
+    }}
+    className="w-full px-3.5 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-700"
+  />
+  {assignEmpSuggestions.length > 0 && (
+    <div className="absolute z-50 w-full bg-white border border-gray-200 rounded-lg shadow-lg mt-1 max-h-48 overflow-y-auto">
+      {assignEmpSuggestions.map(emp => (
+        <div
+          key={emp._id}
+          onClick={() => {
+            setNewAssign(p => ({ ...p, empId: emp._id }))
+            setAssignEmpSearch(`${emp.empId || emp.id} — ${emp.name}`)
+            setAssignEmpSuggestions([])
+          }}
+          className="px-4 py-2 hover:bg-blue-50 cursor-pointer text-sm border-b border-gray-100 last:border-0"
+        >
+          <span className="font-semibold text-blue-600">{emp.empId || emp.id}</span>
+          <span className="text-gray-700 ml-2">{emp.name}</span>
+          <span className="text-gray-400 ml-2 text-xs">{emp.designation} · {emp.department}</span>
+        </div>
+      ))}
+    </div>
+  )}
+  {newAssign.empId && (
+    <p className="text-xs text-green-600 mt-1">✓ Employee selected</p>
+  )}
+</div>
                               </div>
                               <div>
                                 <label className="block text-sm font-semibold text-gray-800 mb-1.5">Expected Return Date</label>
@@ -5322,7 +5963,7 @@ function App() {
                               </div>
                             </div>
                             <div className="flex justify-end gap-3 px-6 py-4 border-t border-gray-100 bg-gray-50">
-                              <button onClick={() => setShowAssignModal(false)} className="px-5 py-2 rounded-lg text-sm font-semibold text-gray-700 bg-white border border-gray-300 hover:bg-gray-100 transition-colors">
+                              <button onClick={() => {setShowAssignModal(false); setNewAssign({ assetId: '', empId: '', returnDate: '' }); setAssignAssetSearch(''); setAssignAssetSuggestions([]); setAssignAssetSearch(''); setAssignAssetSuggestions([]);} } className="px-5 py-2 rounded-lg text-sm font-semibold text-gray-700 bg-white border border-gray-300 hover:bg-gray-100 transition-colors">
                                 Cancel
                               </button>
                               <button onClick={handleAssignSubmit} className="flex items-center gap-2 px-5 py-2 rounded-lg text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700 transition-colors shadow-sm">
@@ -5352,8 +5993,11 @@ function App() {
                     'Peripheral': { icon: Mouse, color: 'text-orange-600', bg: 'bg-orange-100' },
                   }
                   const counts = {}
-                  assets.forEach((a) => { if (a.category) counts[a.category] = (counts[a.category] || 0) + 1 })
-                  customCategories.forEach((c) => { if (!counts[c]) counts[c] = 0 })
+                  assets.forEach((a) => { 
+                    const cat = a.Asset_Type || a.category 
+                    if (cat) counts[cat] = (counts[cat] || 0) + 1 })
+                  customCategories.forEach((c) => {const name = c.name || c
+                   if (!counts[name]) counts[name] = 0  })
                   const categories = Object.entries(counts)
                     .map(([name, count]) => {
                       const iconKey = Object.keys(categoryIconMap).find(k => k === name)
@@ -5362,11 +6006,14 @@ function App() {
                     .sort((a, b) => b.count - a.count)
 
                   const filtered = assets.filter((a) => {
-                    const inCat = selectedCategory === 'All' || a.category === selectedCategory
-                    const q = catSearch.toLowerCase()
-                    const inSearch = !q || a.name.toLowerCase().includes(q) || a.id.toLowerCase().includes(q) || a.serial.toLowerCase().includes(q)
-                    return inCat && inSearch
-                  })
+  const inCat = selectedCategory === 'All' || (a.Asset_Type || a.category) === selectedCategory
+  const q = catSearch.toLowerCase()
+  const inSearch = !q ||
+    (a.Asset_Name || a.name || '').toLowerCase().includes(q) ||
+    (a.Asset_ID || a.id || '').toLowerCase().includes(q) ||
+    (a.Serial_No || a.serial || '').toLowerCase().includes(q)
+  return inCat && inSearch
+})
 
                   const statusBadgeCls = (s) =>
                     s === 'Assigned' ? 'bg-green-100 text-green-700 border-green-200'
@@ -5405,8 +6052,8 @@ function App() {
                             <Boxes className="w-6 h-6 text-white" />
                           </div>
                           <p className="text-sm font-semibold text-gray-900">All Categories</p>
-                          <p className="text-2xl font-bold text-gray-900 mt-1">{assets.length}</p>
-                          <p className="text-xs text-gray-500 mt-0.5">Total Assets</p>
+                         <p className="text-2xl font-bold text-gray-900 mt-1">{Object.keys(counts).length}</p>
+<p className="text-xs text-gray-500 mt-0.5">Total Categories</p>
                         </button>
 
                         {categories.map((c) => {
@@ -5432,85 +6079,101 @@ function App() {
                           )
                         })}
                       </div>
+                    {/* Asset Grid — only show when a specific category is selected */}
+{selectedCategory !== 'All' && (
+  <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+    <div className="flex items-center justify-between px-6 py-5 border-b border-gray-100 flex-wrap gap-3">
+      <div className="flex items-center gap-3">
+        <h3 className="text-lg font-bold text-gray-900">
+          {selectedCategory}s
+        </h3>
+        <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-blue-100 text-blue-700">
+          {filtered.length}
+        </span>
+      </div>
+      <div className="relative w-full max-w-xs">
+        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+        <input
+          type="text"
+          value={catSearch}
+          onChange={(e) => setCatSearch(e.target.value)}
+          placeholder="Search assets..."
+          className="w-full pl-10 pr-4 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white"
+        />
+      </div>
+    </div>
 
-                      {/* Asset Grid */}
-                      <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
-                        <div className="flex items-center justify-between px-6 py-5 border-b border-gray-100 flex-wrap gap-3">
-                          <div className="flex items-center gap-3">
-                            <h3 className="text-lg font-bold text-gray-900">
-                              {selectedCategory === 'All' ? 'All Assets' : `${selectedCategory}s`}
-                            </h3>
-                            <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-blue-100 text-blue-700">
-                              {filtered.length}
-                            </span>
-                          </div>
-                          <div className="relative w-full max-w-xs">
-                            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-                            <input
-                              type="text"
-                              value={catSearch}
-                              onChange={(e) => setCatSearch(e.target.value)}
-                              placeholder="Search assets..."
-                              className="w-full pl-10 pr-4 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white"
-                            />
-                          </div>
-                        </div>
+    {filtered.length === 0 ? (
+      <div className="flex flex-col items-center justify-center py-16 text-center">
+        <div className="w-16 h-16 rounded-full bg-gray-100 flex items-center justify-center mb-3">
+          <Package className="w-8 h-8 text-gray-400" />
+        </div>
+        <p className="text-sm font-semibold text-gray-700">No assets found</p>
+        <p className="text-xs text-gray-500 mt-1">Try changing the category or search query</p>
+      </div>
+    ) : (
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 p-6">
+        {filtered.map((a) => {
+  const catKey = a.Asset_Type || a.category
+  const meta = categoryIconMap[catKey] || { icon: Package, color: 'text-gray-600', bg: 'bg-gray-100' }
+  const Icon = meta.icon
+  const status = a.Status || a.status
+  const assetId = a.Asset_ID || a.id
+  const assetName = a.Asset_Name || a.name
+  const fallbackImg = `https://img.icons8.com/fluency/200/${
+    (catKey || '').toLowerCase().includes('laptop') ? 'laptop' :
+    (catKey || '').toLowerCase().includes('mobile') || (catKey || '').toLowerCase().includes('phone') ? 'smartphone' :
+    (catKey || '').toLowerCase().includes('monitor') ? 'monitor' :
+    (catKey || '').toLowerCase().includes('printer') ? 'print' :
+    (catKey || '').toLowerCase().includes('tablet') ? 'tablet' :
+    (catKey || '').toLowerCase().includes('camera') ? 'camera' :
+    (catKey || '').toLowerCase().includes('desktop') ? 'desktop' :
+    'electronics'
+  }.png`
 
-                        {filtered.length === 0 ? (
-                          <div className="flex flex-col items-center justify-center py-16 text-center">
-                            <div className="w-16 h-16 rounded-full bg-gray-100 flex items-center justify-center mb-3">
-                              <Package className="w-8 h-8 text-gray-400" />
-                            </div>
-                            <p className="text-sm font-semibold text-gray-700">No assets found</p>
-                            <p className="text-xs text-gray-500 mt-1">Try changing the category or search query</p>
-                          </div>
-                        ) : (
-                          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 p-6">
-                            {filtered.map((a) => {
-                              const meta = categoryIconMap[a.category] || { icon: Package, color: 'text-gray-600', bg: 'bg-gray-100' }
-                              const Icon = meta.icon
-                              return (
-                                <div
-                                  key={a.id}
-                                  className="border border-gray-200 rounded-xl overflow-hidden hover:shadow-lg hover:-translate-y-0.5 transition-all cursor-pointer group bg-white"
-                                  onClick={() => { setSelectedAssetId(a.id); setDetailsTab('Assignment History') }}
-                                >
-                                  <div className="aspect-[4/3] bg-gray-50 flex items-center justify-center overflow-hidden">
-                                    <img
-                                      src={a.image}
-                                      alt={a.name}
-                                      className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-                                    />
-                                  </div>
-                                  <div className="p-4">
-                                    <div className="flex items-start justify-between gap-2 mb-2">
-                                      <div className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-semibold ${meta.bg} ${meta.color}`}>
-                                        <Icon className="w-3 h-3" />
-                                        {a.category}
-                                      </div>
-                                      <span className={`inline-flex px-2 py-0.5 rounded text-[10px] font-bold border ${statusBadgeCls(a.status)}`}>
-                                        {a.status}
-                                      </span>
-                                    </div>
-                                    <h4 className="text-sm font-bold text-gray-900 line-clamp-1" title={a.name}>{a.name}</h4>
-                                    <p className="text-xs font-semibold text-blue-600 mt-0.5">{a.id}</p>
-                                    <div className="mt-3 pt-3 border-t border-gray-100 space-y-1">
-                                      <div className="flex justify-between text-xs">
-                                        <span className="text-gray-500">Location</span>
-                                        <span className="text-gray-800 font-medium truncate ml-2 max-w-[60%] text-right">{a.location}</span>
-                                      </div>
-                                      <div className="flex justify-between text-xs">
-                                        <span className="text-gray-500">Assigned</span>
-                                        <span className="text-gray-800 font-medium truncate ml-2 max-w-[60%] text-right">{a.assignedTo}</span>
-                                      </div>
-                                    </div>
-                                  </div>
-                                </div>
-                              )
-                            })}
-                          </div>
-                        )}
-                      </div>
+  return (
+    <div
+      key={a._id || assetId}
+      className="border border-gray-200 rounded-xl overflow-hidden hover:shadow-lg hover:-translate-y-0.5 transition-all cursor-pointer group bg-white"
+      onClick={() => { setSelectedAssetId(assetId); setDetailsTab('Assignment History') }}
+    >
+      <div className="h-24 bg-gray-50 flex items-center justify-center overflow-hidden p-3">
+        <img
+          src={a.Image && a.Image.length > 10 ? a.Image : (a.image || fallbackImg)}
+          alt={assetName}
+          className="max-h-16 max-w-16 object-contain group-hover:scale-105 transition-transform duration-300"
+        />
+      </div>
+      <div className="p-4">
+        <div className="flex items-start justify-between gap-2 mb-2">
+          <div className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-semibold ${meta.bg} ${meta.color}`}>
+            <Icon className="w-3 h-3" />
+            {catKey}
+          </div>
+          <span className={`inline-flex px-2 py-0.5 rounded text-[10px] font-bold border ${
+            status === 'Available' ? 'bg-green-100 text-green-700 border-green-200' :
+            status === 'In Use' || status === 'Assigned' ? 'bg-blue-100 text-blue-700 border-blue-200' :
+            status === 'Under Repair' ? 'bg-amber-100 text-amber-700 border-amber-200' :
+            'bg-red-100 text-red-700 border-red-200'
+          }`}>
+            {status}
+          </span>
+        </div>
+        <h4 className="text-sm font-bold text-gray-900 line-clamp-1" title={assetName}>{assetName}</h4>
+        <p className="text-xs font-semibold text-blue-600 mt-0.5">{assetId}</p>
+      </div>
+    </div>
+  )
+})}
+
+        
+        
+      </div>
+    )}
+  </div>
+)}
+
+                      
 
                       {/* Category Add Modal */}
                       {showCategoryModal && (
@@ -5532,24 +6195,61 @@ function App() {
                                   className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                                 />
                                 <p className="text-xs text-gray-500 mt-1">This category will appear in the Assets form and filter cards.</p>
-                              </div>
+</div>
+<div>
+  <label className="block text-sm font-semibold text-gray-700 mb-1">Category Image</label>
+  <input
+    type="file"
+    accept="image/png,image/jpeg"
+    onChange={(e) => {
+      const file = e.target.files?.[0]
+      if (!file) return
+      const reader = new FileReader()
+      reader.onloadend = () => setCatImage(reader.result)
+      reader.readAsDataURL(file)
+    }}
+    className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+  />
+  {catImage && (
+    <img src={catImage} alt="preview" className="mt-2 h-20 w-20 object-contain rounded-lg border border-gray-200" />
+  )}
+  <p className="text-xs text-gray-500 mt-1">Optional. PNG or JPG under 2MB.</p>
+</div>
                             </div>
                             <div className="flex justify-end gap-3 px-6 py-4 border-t border-gray-100 bg-gray-50">
                               <button onClick={() => setShowCategoryModal(false)} className="px-5 py-2 rounded-lg text-sm font-semibold text-gray-700 bg-white border border-gray-300 hover:bg-gray-100 transition-colors">Cancel</button>
                               <button
-                                onClick={() => {
-                                  const name = catForm.name.trim()
-                                  if (!name) { setCatFormError('Category name is required.'); return }
-                                  const existing = assets.map(a => a.category)
-                                  if (existing.includes(name) || customCategories.includes(name)) { setCatFormError('This category already exists.'); return }
-                                  setCustomCategories(prev => [...prev, name])
-                                  setSelectedCategory(name)
-                                  setShowCategoryModal(false)
-                                }}
-                                className="px-5 py-2 rounded-lg text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700 transition-colors shadow-sm"
-                              >
-                                Add Category
-                              </button>
+  onClick={async () => {
+    const name = catForm.name.trim()
+    if (!name) { setCatFormError('Category name is required.'); return }
+    const existing = assets.map(a => a.Asset_Type || a.category)
+    if (existing.includes(name) || customCategories.map(c => c.name || c).includes(name)) { setCatFormError('This category already exists.'); return }
+    try {
+      const res = await fetch('/api/categories', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, image: catImage || '' })
+      })
+      const json = await res.json()
+      if (json.success) {
+        setCustomCategories(prev => [...prev, json.data])
+        setSelectedCategory(name)
+      } else {
+        setCatFormError(json.message || 'Failed to save category')
+        return
+      }
+    } catch(e) {
+      setCatFormError('Failed to save category')
+      return
+    }
+    setCatImage(null)
+    setCatForm({ name: '' })
+    setShowCategoryModal(false)
+  }}
+  className="px-5 py-2 rounded-lg text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700 transition-colors shadow-sm"
+>
+  Add Category
+</button>
                             </div>
                           </div>
                         </div>
@@ -5980,6 +6680,7 @@ function App() {
         </div>
       </div>
       {/* ── QR CODE MODAL ── */}
+      
         {qrModalAsset && qrCodeDataUrl && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
             <div className="bg-white rounded-2xl shadow-2xl p-8 w-full max-w-sm mx-4 text-center">

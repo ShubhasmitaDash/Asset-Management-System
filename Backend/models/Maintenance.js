@@ -2,9 +2,12 @@ const mongoose = require("mongoose");
 
 const maintenanceSchema = new mongoose.Schema({
   asset_id: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: "Asset",
+    type: String,
     required: true,
+  },
+  asset_name: {
+    type: String,
+    default: '',
   },
   service_date: {
     type: Date,
@@ -20,15 +23,18 @@ const maintenanceSchema = new mongoose.Schema({
   },
   remarks: {
     type: String,
+    default: '',
   },
   cost: {
     type: Number,
     default: 0,
   },
-  status_after_service: {
+  status: {
     type: String,
-    enum: ["Available", "In Use", "Under Repair", "Disposed"],
-    default: "Under Repair",
+    default: 'In Progress',
+  },
+  next_due_date: {
+    type: Date,
   },
   created_at: {
     type: Date,
