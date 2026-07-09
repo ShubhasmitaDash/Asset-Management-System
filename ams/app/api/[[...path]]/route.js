@@ -7,8 +7,153 @@ const getCollection = async (name) => {
   const db = client.db('ams')
   return db.collection(name)
 }
+// 👇 add 'notifications' here
+const COLLECTIONS = ['assets', 'users', 'vendors', 'maintenances', 'assignments', 'categories', 'notifications']
 
-const COLLECTIONS = ['assets', 'users', 'vendors', 'maintenances', 'assignments']
+export async function GET(request, { params }) {
+  const endpoint = params.path[0]
+
+  if (endpoint === 'assets') {
+    const col = await getCollection('assets') // fixed: was using undefined `db`
+    const assets = await col.find({}).toArray()
+    const serialized = assets.map(a => ({
+      ...a,
+      _id: a._id.toString(),
+      id: a.id || a._id.toString(),
+      name: a.Asset_Name || a.name || '',
+      category: a.Asset_Type ? a.Asset_Type.charAt(0).toUpperCase() + a.Asset_Type.slice(1).toLowerCase() : 'Other',
+      serial: a.Serial_No || a.serial || '',
+      purchaseDate: a.Purchase_Date || a.purchaseDate || '',
+      warranty: a.Warranty || a.warranty || '',
+      status: a.Status || a.status || 'Available',
+      assignedTo: a.assignedTo || '-',
+      image: a.image || '',
+      vendor: a.vendor || '',
+      location: a.location || '',
+      description: a.description || '',
+      model: a.model || '',
+      manufacturer: a.manufacturer || '',
+      purchasePrice: a.purchasePrice || 0,
+    }))
+    return NextResponse.json(serialized)
+  }
+
+  try {
+    const col = await getCollection(endpoint)
+
+    // 👇 special-case notifications: sort newest first, cap at 200
+    if (endpoint === 'notifications') {
+      const data = await col.find({}).sort({ timestamp: -1 }).limit(200).toArray()
+      const serialized = data.map(d => ({ ...d, _id: d._id.toString() }))
+      return NextResponse.json({ success: true, data: serialized })
+    }
+
+    const data = await col.find({}).toArray()
+    const serialized = data.map(d => ({ ...d, _id: d._id.toString() }))
+    return NextResponse.json(serialized)
+  } catch (err) {
+    return NextResponse.json({ error: err.message }, { status: 500 })
+  }
+}
+
+export async function POST(request, { params }) {
+  const endpoint = params.path[0]
+  if (!COLLECTIONS.includes(endpoint)) {
+    return NextResponse.json({ success: false, error: 'Unknown endpoint' }, { status: 404 })
+  }
+  try {
+    const body = await request.json()
+    const col = await getCollection(endpoint)
+
+    // 👇 special-case notifications: apply defaults
+    if (endpoint === 'notifications') {
+      const doc = {
+        type: body.type,
+        title: body.title,
+        desc: body.desc,
+        target: body.target || '',
+        recipient: body.recipient || 'Admin',
+        recipientName: body.recipientName || '',
+        read: false,
+        timestamp: Date.now(),
+      }
+      const result = await col.insertOne(doc)
+      return NextResponse.json({ success: true, data: { ...doc, _id: result.insertedId.toString() } })
+    }
+
+    const result = await col.insertOne(body)
+    return NextResponse.json({ success: true, id: result.insertedId.toString() })
+  } catch (err) {
+    return NextResponse.json({ success: false, error: err.message }, { status: 500 })
+  }
+}
+
+export async function PUT(request, { params }) {
+  const endpoint = params.path[0]
+  const id = params.path[1]
+
+  if (!COLLECTIONS.includes(endpoint)) {
+    return NextResponse.json({ success: false, error: 'Invalid request' }, { status: 400 })
+  }
+
+  // 👇 special-case notifications with no id: mark ALL as read
+  if (endpoint === 'notifications' && !id) {
+    try {
+      const col = await getCollection('notifications')
+      await col.updateMany({}, { $set: { read: true } })
+      return NextResponse.json({ success: true })
+    } catch (err) {
+      return NextResponse.json({ success: false, error: err.message }, { status: 500 })
+    }
+  }
+
+  if (!id) {
+    return NextResponse.json({ success: false, error: 'Invalid request' }, { status: 400 })
+  }
+
+  try {
+    const body = await request.json()
+    const col = await getCollection(endpoint)
+    const { _id, ...updateData } = body
+    await col.updateOne({ _id: new ObjectId(id) }, { $set: updateData })
+    return NextResponse.json({ success: true })
+  } catch (err) {
+    return NextResponse.json({ success: false, error: err.message }, { status: 500 })
+  }
+}
+
+export async function DELETE(request, { params }) {
+  const endpoint = params.path[0]
+  const id = params.path[1]
+
+  if (!COLLECTIONS.includes(endpoint)) {
+    return NextResponse.json({ success: false, error: 'Invalid request' }, { status: 400 })
+  }
+
+  // 👇 special-case notifications with no id: clear ALL
+  if (endpoint === 'notifications' && !id) {
+    try {
+      const col = await getCollection('notifications')
+      await col.deleteMany({})
+      return NextResponse.json({ success: true })
+    } catch (err) {
+      return NextResponse.json({ success: false, error: err.message }, { status: 500 })
+    }
+  }
+
+  if (!id) {
+    return NextResponse.json({ success: false, error: 'Invalid request' }, { status: 400 })
+  }
+
+  try {
+    const col = await getCollection(endpoint)
+    await col.deleteOne({ _id: new ObjectId(id) })
+    return NextResponse.json({ success: true })
+  } catch (err) {
+    return NextResponse.json({ success: false, error: err.message }, { status: 500 })
+  }
+}
+
 
 export async function GET(request, { params }) {
   const endpoint = params.path[0]

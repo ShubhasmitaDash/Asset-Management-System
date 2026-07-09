@@ -455,11 +455,7 @@ function App() {
   const [selectedReturns, setSelectedReturns] = useState([])
   const [returnModalRow, setReturnModalRow] = useState(null)
   const [returnForm, setReturnForm] = useState({ date: new Date().toISOString().slice(0,10), condition: 'Good', notes: '' })
-  const [returnedRecords, setReturnedRecords] = useState([
-    { id: 'RT4001', assetId: 'A1004', assetName: 'Samsung 24" Monitor', employee: 'Mike Johnson', returnDate: '20-04-2024', condition: 'Good', notes: 'Working perfectly' },
-    { id: 'RT4002', assetId: 'A1002', assetName: 'HP LaserJet Pro', employee: 'David Lee', returnDate: '18-03-2024', condition: 'Damaged', notes: 'Paper tray cracked' },
-    { id: 'RT4003', assetId: 'A1001', assetName: 'Dell Latitude 5440', employee: 'Mike Johnson', returnDate: '15-02-2024', condition: 'Good', notes: 'Returned in original condition' },
-  ])
+  const [returnedRecords, setReturnedRecords] = useState([])
 
   // Live data state (shared across modules)
   const [assets, setAssets] = useState([])
@@ -510,34 +506,41 @@ function App() {
       .catch(err => console.error('Assignments fetch error:', err))
   }, [])
     // Generate notifications from real data
-  useEffect(() => {
-    if (!assets.length && !assignments.length) return
-    const now = Date.now()
-    const thirtyDays = 30*24*60*60*1000
-    const generated = []
+  const seededRef = useRef(false)
+useEffect(() => {
+  if (seededRef.current) return
+  if (!assets.length && !assignments.length) return
+  seededRef.current = true
+   const alreadyHasSaved = typeof window !== 'undefined' && localStorage.getItem('ams_notifications')
+  if (alreadyHasSaved) return
+  const now = Date.now()
+  const thirtyDays = 30*24*60*60*1000
+  const generated = []
 
-    assignments.slice(0,3).forEach((a,i) => {
-      generated.push({ id: `N-ASN-${i}`, type: 'assignment', title: 'Asset Assignment', desc: `${a.assetName} (${a.assetId}) assigned to ${a.employee}`, time: a.assignedDate, timestamp: now - i*60*1000, read: i > 0, target: 'Asset Assignment' })
-    })
+  assignments.slice(0,3).forEach((a,i) => {
+    generated.push({ id: `N-ASN-${i}`, type: 'assignment', title: 'Asset Assignment', desc: `${a.assetName} (${a.assetId}) assigned to ${a.employee}`, time: a.assignedDate, timestamp: now - i*60*1000, read: i > 0, target: 'Asset Assignment' })
+  })
 
-    maintenanceRecords.filter(m=>m.status==='In Progress').slice(0,2).forEach((m,i) => {
-      generated.push({ id: `N-MNT-${i}`, type: 'maintenance', title: 'Maintenance In Progress', desc: `${m.assetName} (${m.assetId}) — ${m.type || m.issue_description}`, time: m.serviceDate || 'Recently', timestamp: now - (i+1)*60*60*1000, read: false, target: 'Maintenance' })
-    })
+  maintenanceRecords.filter(m=>m.status==='In Progress').slice(0,2).forEach((m,i) => {
+    generated.push({ id: `N-MNT-${i}`, type: 'maintenance', title: 'Maintenance In Progress', desc: `${m.assetName} (${m.assetId}) — ${m.type || m.issue_description}`, time: m.serviceDate || 'Recently', timestamp: now - (i+1)*60*60*1000, read: false, target: 'Maintenance' })
+  })
 
-    assets.filter(a => {
-      if (!a.Warranty) return false
-      const w = new Date(a.Warranty)
-      return w >= new Date() && w <= new Date(now + thirtyDays)
-    }).slice(0,2).forEach((a,i) => {
-      generated.push({ id: `N-WAR-${i}`, type: 'warranty', title: 'Warranty Expiring Soon', desc: `${a.Asset_Name} (${a.Asset_ID}) warranty expires on ${new Date(a.Warranty).toLocaleDateString()}`, time: 'Upcoming', timestamp: now - (i+2)*60*60*1000, read: false, target: 'Assets' })
-    })
+  assets.filter(a => {
+  if (!a.Warranty) return false
+  const w = new Date(a.Warranty)
+  return w >= new Date() && w <= new Date(now + thirtyDays)
+}).slice(0,2).forEach((a,i) => {
+  generated.push({
+    id: `N-WAR-${i}`, type: 'warranty',
+    title: 'Warranty Expiring Soon',
+    desc: `${a.Asset_Name} (${a.Asset_ID}) warranty expires on ${new Date(a.Warranty).toLocaleDateString()} — notify ${a.Vendor || 'vendor'}`,
+    time: 'Upcoming', timestamp: now - (i+2)*60*60*1000, read: false,
+    target: 'Assets', recipient: 'Supplier', recipientName: a.Vendor,
+  })
+})
 
-    assets.filter(a=>a.Status==='Available').slice(0,1).forEach((a,i) => {
-      generated.push({ id: `N-INV-${i}`, type: 'inventory', title: 'Asset Available', desc: `${a.Asset_Name} (${a.Asset_ID}) is available for assignment`, time: 'Now', timestamp: now - 3*60*60*1000, read: true, target: 'Asset Assignment' })
-    })
-
-    if (generated.length) setNotifications(generated)
-  }, [assets, assignments, maintenanceRecords])
+  if (generated.length) setNotifications(generated)
+}, [assets, assignments, maintenanceRecords])
   // Save to MongoDB helper
   const saveToDb = async (collection, data) => {
     try {
@@ -550,6 +553,28 @@ function App() {
       console.error(`Save to ${collection} failed:`, err)
     }
   }
+  const adjustVendorStats = async (vendorName, deltaAssets, deltaSpend) => {
+  if (!vendorName) return
+  const vendor = vendors.find(v => v.name === vendorName)
+  if (!vendor) return
+
+  const newAssetsCount = Math.max(0, (vendor.assetsCount || 0) + deltaAssets)
+  const newTotalSpend = Math.max(0, (vendor.totalSpend || 0) + deltaSpend)
+
+  setVendors(prev => prev.map(v =>
+    v.name === vendorName ? { ...v, assetsCount: newAssetsCount, totalSpend: newTotalSpend } : v
+  ))
+
+  try {
+    await fetch(`/api/vendors/${vendor._id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ assetsCount: newAssetsCount, totalSpend: newTotalSpend }),
+    })
+  } catch (e) {
+    console.error('adjustVendorStats error:', e)
+  }
+}
   const updateInDb = async (collection, id, data) => {
     try {
       await fetch(`/api/${collection}/${id}`, {
@@ -600,7 +625,15 @@ function App() {
   const [selectedVendor, setSelectedVendor] = useState(null)
 
   // Notifications state
-  const [notifications, setNotifications] = useState(initialNotifications)
+  const [notifications, setNotifications] = useState(() => {
+  if (typeof window === 'undefined') return initialNotifications
+  try {
+    const saved = localStorage.getItem('ams_notifications')
+    return saved ? JSON.parse(saved) : initialNotifications
+  } catch {
+    return initialNotifications
+  }
+})
   const [notifDropdownOpen, setNotifDropdownOpen] = useState(false)
   const [notifFilter, setNotifFilter] = useState('All')
   const notifDropdownRef = useRef(null)
@@ -610,6 +643,28 @@ function App() {
   const markAllNotifRead = () => setNotifications(prev => prev.map(n => ({ ...n, read: true })))
   const clearAllNotifs = () => setNotifications([])
   const deleteNotif = (id) => setNotifications(prev => prev.filter(n => n.id !== id))
+const pushNotification = ({ type, title, desc, target, recipient = 'Admin', recipientName = '' }) => {
+  setNotifications(prev => [
+    {
+      id: `N-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      type, title, desc, target,
+      recipient,
+      recipientName,
+      time: 'Just now',
+      timestamp: Date.now(),
+      read: false,
+    },
+    ...prev,
+  ])
+}
+// ADDED: persist notifications to localStorage whenever they change
+useEffect(() => {
+  try {
+    localStorage.setItem('ams_notifications', JSON.stringify(notifications))
+  } catch (e) {
+    console.error('Failed to save notifications:', e)
+  }
+}, [notifications])
 
   // Users state
   const [users, setUsers] = useState([])
@@ -923,6 +978,7 @@ if (res.ok) {
       Image: compressedImage || x.Image,
     } : x))
     alert(`✅ Asset "${form.assetName}" updated!`)
+    pushNotification({ type: 'inventory', title: 'Asset Updated', desc: `${form.assetName} was updated`, target: 'Assets' })
   } else {
     const newAsset = {
       _id:           json.data?._id,
@@ -939,7 +995,13 @@ if (res.ok) {
       Image:         compressedImage || assetData.Image,
     }
     setAssets(prev => [...prev, newAsset])
-    alert(`✅ Asset "${form.assetName}" saved to MongoDB!`)
+alert(`✅ Asset "${form.assetName}" saved to MongoDB!`)
+pushNotification({ type: 'inventory', title: 'New Asset Added', desc: `${form.assetName} (${newAsset.Asset_ID}) added to inventory`, target: 'Assets', recipient: 'Admin' })
+if (form.vendor) {
+  adjustVendorStats(form.vendor, 1, Number(form.purchasePrice) || 0)
+  pushNotification({ type: 'vendor', title: 'Order Confirmed', desc: `${form.assetName} received from ${form.vendor} and added to inventory`, target: 'Vendors', recipient: 'Supplier', recipientName: form.vendor })
+}
+
   }
   setEditingAssetId(null)
   handleCancel()
@@ -2625,7 +2687,11 @@ if (res.ok) {
                   <QrIcon className="w-4 h-4" />
                 </button>
                 <button
-                  onClick={async (e) => { e.stopPropagation(); if(confirm('Delete this asset?')) { await fetch(`/api/assets/${a._id}`, { method: 'DELETE' }); setAssets(prev => prev.filter(x => x._id !== a._id)) }}}
+                  onClick={async (e) => { e.stopPropagation(); if(confirm('Delete this asset?')) { await fetch(`/api/assets/${a._id}`, { method: 'DELETE' }); setAssets(prev => prev.filter(x => x._id !== a._id)) 
+                  pushNotification({ type: 'inventory', title: 'Asset Deleted', desc: `${a.Asset_Name} was removed from inventory`, target: 'Assets' })
+                  if (a.Vendor) {
+        adjustVendorStats(a.Vendor, -1, -(a.Purchase_Price || 0))
+      }}}}
                   title="Delete"
                   className="w-8 h-8 rounded-md bg-red-500 hover:bg-red-600 text-white flex items-center justify-center"
                 >
@@ -2846,9 +2912,32 @@ if (res.ok) {
                               <button
                                 onClick={async () => {
                                   if (!empForm.name.trim() || !empForm.department || !empForm.designation.trim() || !empForm.email.trim()) {
-                                    setEmpFormError('Please fill in all required fields.')
-                                    return
-                                  }
+  setEmpFormError('Please fill in all required fields.')
+  return
+}
+const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+if (!emailRegex.test(empForm.email.trim())) {
+  setEmpFormError('Please enter a valid email address (e.g. name@company.com)')
+  return
+}
+if (empForm.phone && !/^[6-9]\d{9}$/.test(empForm.phone.trim())) {
+  setEmpFormError('Phone must be a valid 10-digit Indian mobile number starting with 6-9')
+  return
+}
+// Check duplicate email
+const dupEmail = employees.find(e => e.email?.toLowerCase() === empForm.email.trim().toLowerCase() && e._id !== editEmpTarget?._id)
+if (dupEmail) {
+  setEmpFormError(`This email is already used by ${dupEmail.name}`)
+  return
+}
+// Check duplicate phone
+if (empForm.phone) {
+  const dupPhone = employees.find(e => e.phone === empForm.phone.trim() && e._id !== editEmpTarget?._id)
+  if (dupPhone) {
+    setEmpFormError(`This phone number is already used by ${dupPhone.name}`)
+    return
+  }
+}
                                   if (editEmpTarget) {
                                     setEmployees(prev => prev.map(e => e.id === editEmpTarget.id ? { ...e, ...empForm } : e))
                                   } else {
@@ -2903,7 +2992,14 @@ const statusData = [
   { label: 'Under Repair', value: assets.filter(a=>a.Status==='Under Repair').length, color: '#ef4444' },
 ]
 const totalStat = statusData.reduce((s,d) => s+d.value, 0) || 1
-                 
+
+const stats = [
+  { label: 'Total Assets', value: assets.length, icon: Monitor, bg: 'bg-blue-100', color: 'text-blue-500' },
+  { label: 'Assigned Assets', value: assets.filter(a => a.Status === 'In Use').length, icon: CheckSquare, bg: 'bg-emerald-100', color: 'text-emerald-500' },
+  { label: 'Available Assets', value: assets.filter(a => a.Status === 'Available').length, icon: Package, bg: 'bg-amber-100', color: 'text-amber-500' },
+  { label: 'Under Maintenance', value: assets.filter(a => a.Status === 'Under Repair').length, icon: Wrench, bg: 'bg-red-100', color: 'text-red-500' },
+]
+
 
                   const activities = [
   ...assignments.slice(0,3).map(a => ({ icon: UserPlus, color: 'text-blue-500', bg: 'bg-blue-100', text: `${a.assetName} assigned to ${a.employee}`, time: a.assignedDate })),
@@ -3400,6 +3496,15 @@ const totalStat = statusData.reduce((s,d) => s+d.value, 0) || 1
                                         ...prev,
                                       ])
                                       setMaintFormSuccess('✅ Maintenance logged successfully!')
+                                      pushNotification({
+                                      type: 'maintenance',
+                                      title: 'New Maintenance Job Assigned',
+                                      desc: `${maintForm.asset_name} — ${maintForm.issue_description}`,
+                                      target: 'Maintenance',
+                                      recipient: 'Maintainer',
+                                      recipientName: maintForm.technician_name,
+                                    })
+                                    setTimeout(() => setShowMaintenanceModal(false), 1500)
                                       setTimeout(() => setShowMaintenanceModal(false), 1500)
                                     } else {
                                       setMaintFormError(json.message || 'Failed to log maintenance.')
@@ -4453,6 +4558,7 @@ const topDepts = Object.entries(deptCounts)
                     setUsers([...users, next])
                     setNewUser({ name: '', email: '', phone: '', role: 'Employee', department: '' })
                     setShowAddUser(false)
+                    pushNotification({ type: 'system', title: 'User Invited', desc: `Invitation sent to ${next.email}`, target: 'Users' })
                     alert(`✓ Invite sent to ${next.email}`)
                   }
 
@@ -4752,12 +4858,13 @@ const topDepts = Object.entries(deptCounts)
                 })()
               ) : activeMenu === 'Notifications' ? (
                 (() => {
-                  const filters = ['All', 'Unread', 'Read', 'Assignment', 'Maintenance', 'Warranty', 'System']
+                  const filters = ['All', 'Unread', 'Read', 'Admin', 'Maintainer', 'Supplier', 'Assignment', 'Maintenance', 'Warranty', 'System']
                   const filterMap = { Assignment: 'assignment', Maintenance: 'maintenance', Warranty: 'warranty', System: 'system' }
                   const filtered = notifications.filter(n => {
                     if (notifFilter === 'All') return true
                     if (notifFilter === 'Unread') return !n.read
                     if (notifFilter === 'Read') return n.read
+                    if (['Admin', 'Maintainer', 'Supplier'].includes(notifFilter)) return n.recipient === notifFilter
                     return n.type === filterMap[notifFilter]
                   })
 
@@ -4861,7 +4968,9 @@ const topDepts = Object.entries(deptCounts)
                                     <div className="flex items-center gap-2 flex-wrap">
                                       <h4 className={`text-sm ${!n.read ? 'font-bold text-gray-900' : 'font-semibold text-gray-700'}`}>{n.title}</h4>
                                       {!n.read && <span className="px-2 py-0.5 rounded-full bg-blue-600 text-white text-[10px] font-bold">NEW</span>}
-                                      <span className="text-[11px] uppercase tracking-wider font-semibold text-gray-400 capitalize">· {n.type}</span>
+                                      <span className="text-[11px] uppercase tracking-wider font-semibold text-gray-400 capitalize">
+  · {n.type} {n.recipient !== 'Admin' && `→ ${n.recipient}${n.recipientName ? ` (${n.recipientName})` : ''}`}
+</span>
                                     </div>
                                     <p className="text-sm text-gray-600 mt-1">{n.desc}</p>
                                     <p className="text-xs text-gray-400 mt-1.5 flex items-center gap-1">
@@ -4902,14 +5011,18 @@ const topDepts = Object.entries(deptCounts)
                     const inSearch = !q || v.name.toLowerCase().includes(q) || v.contact.toLowerCase().includes(q) || v.email.toLowerCase().includes(q) || v.city.toLowerCase().includes(q)
                     return inFilter && inSearch
                   })
-                  const totalSpend = assets.reduce((s, a) => s + (a.Purchase_Price || 0), 0)
-                  const topVendor = vendors.length ? [...vendors].sort((a, b) => getVendorSpend(b.name) - getVendorSpend(a.name))[0] : { name: 'N/A', totalSpend: 0 }
+                  const totalSpend = vendors.reduce((s, v) => s + (v.totalSpend || 0), 0)
+const vendorsWithSpend = vendors.filter(v => (v.totalSpend || 0) > 0)
+const topVendor = vendorsWithSpend.length
+  ? [...vendorsWithSpend].sort((a, b) => (b.totalSpend||0) - (a.totalSpend||0))[0]
+  : null
                   const stats = [
-                    { label: 'Top Vendor', value: topVendor.name.split(' ')[0], icon: TrendingUp, color: 'text-purple-500', bg: 'bg-purple-100', sub: `₹${getVendorSpend(topVendor.name).toLocaleString('en-IN')}` },
+                    
                     { label: 'Total Vendors', value: vendors.length, icon: Truck, color: 'text-blue-500', bg: 'bg-blue-100' },
                     { label: 'Active', value: vendors.filter(v => v.status === 'Active').length, icon: CheckCircle2, color: 'text-emerald-500', bg: 'bg-emerald-100' },
                     { label: 'Total Spend', value: `₹${(totalSpend / 100000).toFixed(1)}L`, icon: Package, color: 'text-amber-500', bg: 'bg-amber-100' },
                     //{ label: 'Top Vendor', value: topVendor.name.split(' ')[0], icon: TrendingUp, color: 'text-purple-500', bg: 'bg-purple-100', sub: `₹${topVendor.totalSpend.toLocaleString('en-IN')}` },
+                    { label: 'Top Vendor', value: topVendor ? topVendor.name.split(' ')[0] : 'No purchases yet', icon: TrendingUp, color: 'text-purple-500', bg: 'bg-purple-100', sub: topVendor ? `₹${(topVendor.totalSpend||0).toLocaleString('en-IN')}` : '' },
                   ]
                   const filters = ['All', 'Active', 'Inactive', 'Hardware', 'Software', 'Services']
                   const vendorAccent = (id) => {
@@ -5037,11 +5150,14 @@ const topDepts = Object.entries(deptCounts)
                                 <div className="grid grid-cols-2 gap-2 mt-4 pt-4 border-t border-gray-100">
                                   <div>
                                     <p className="text-[10px] text-gray-500 uppercase font-semibold tracking-wider">Assets</p>
-                                    <p className="text-base font-bold text-gray-900">{getVendorAssetCount(v.name)}</p>
+                                    <p className="text-base font-bold text-gray-900">{v.assetsCount || 0}</p>
+
                                   </div>
                                   <div className="text-right">
                                     <p className="text-[10px] text-gray-500 uppercase font-semibold tracking-wider">Total Spend</p>
-                                    <p className="text-base font-bold text-blue-600">₹{(v.totalSpend/1000).toFixed(1)}k</p>
+                                    <p className="text-base font-bold text-blue-600">
+  {v.totalSpend > 0 ? `₹${(v.totalSpend/1000).toFixed(1)}k` : '—'}
+</p>
                                   </div>
                                 </div>
                               </div>
@@ -5268,9 +5384,32 @@ const topDepts = Object.entries(deptCounts)
                               <button
                                 onClick={async() => {
                                   if (!vendorForm.name.trim() || !vendorForm.contact.trim() || !vendorForm.email.trim()) {
-                                    setVendorFormError('Please fill in Company Name, Contact Person, and Email.')
-                                    return
-                                  }
+  setVendorFormError('Please fill in Company Name, Contact Person, and Email.')
+  return
+}
+const vendorEmailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+if (!vendorEmailRegex.test(vendorForm.email.trim())) {
+  setVendorFormError('Please enter a valid email address (e.g. contact@company.com)')
+  return
+}
+if (vendorForm.phone && !/^[+]?[\d\s\-()]{7,15}$/.test(vendorForm.phone.trim())) {
+  setVendorFormError('Please enter a valid phone number (e.g. +91 98765 12345)')
+  return
+}
+// Check duplicate email
+const dupVendorEmail = vendors.find(v => v.email?.toLowerCase() === vendorForm.email.trim().toLowerCase() && v.id !== editVendorTarget?.id)
+if (dupVendorEmail) {
+  setVendorFormError(`This email is already used by ${dupVendorEmail.name}`)
+  return
+}
+// Check duplicate phone
+if (vendorForm.phone) {
+  const dupVendorPhone = vendors.find(v => v.phone === vendorForm.phone.trim() && v.id !== editVendorTarget?.id)
+  if (dupVendorPhone) {
+    setVendorFormError(`This phone number is already used by ${dupVendorPhone.name}`)
+    return
+  }
+}
                                   if (editVendorTarget) {
                                     setVendors(prev => prev.map(v => v.id === editVendorTarget.id ? { ...v, ...vendorForm } : v))
                                   } else {
@@ -5279,6 +5418,7 @@ const topDepts = Object.entries(deptCounts)
                                     const nextId = 'V' + String(nextNum).padStart(3, '0')
                                     setVendors(prev => [...prev, { id: nextId, ...vendorForm, assetsCount: 0, totalSpend: 0, rating: 3, since: new Date().getFullYear() }])
                                     await saveToDb('vendors', { id: nextId, ...vendorForm, assetsCount: 0, totalSpend: 0, rating: 3, since: new Date().getFullYear() })
+                                    pushNotification({ type: 'vendor', title: 'New Vendor Added', desc: `${vendorForm.name} added to vendor list`, target: 'Vendors' })
                                   }
                                   setShowVendorModal(false)
                                 }}
@@ -5343,22 +5483,43 @@ const topDepts = Object.entries(deptCounts)
                       }))
                     setReturnedRecords([...newRecords, ...returnedRecords])
                     setSelectedReturns([])
+                    pushNotification({ type: 'return', title: 'Bulk Return Completed', desc: `${newRecords.length} assets returned successfully`, target: 'Return Assets' })
                     alert(`✓ ${newRecords.length} assets returned successfully`)
                   }
-                  const submitReturn = () => {
-                    const row = returnModalRow
-                    const dateParts = returnForm.date.split('-')
-                    const formattedDate = `${dateParts[2]}-${dateParts[1]}-${dateParts[0]}`
-                    const newRecord = {
-                      id: `RT${4100 + returnedRecords.length}`,
-                      assetId: row.assetId, assetName: row.assetName, employee: row.employee,
-                      returnDate: formattedDate, condition: returnForm.condition, notes: returnForm.notes || '-',
-                    }
-                    setReturnedRecords([newRecord, ...returnedRecords])
-                    setSelectedReturns((prev) => prev.filter(x => x !== row.id))
-                    setReturnModalRow(null)
-                    setReturnTab('Recent')
-                  }
+                  const submitReturn = async () => {
+  const row = returnModalRow
+  const dateParts = returnForm.date.split('-')
+  const formattedDate = `${dateParts[2]}-${dateParts[1]}-${dateParts[0]}`
+  const newRecord = {
+    id: `RT${String(returnedRecords.length + 1).padStart(4,'0')}`,
+    assetId: row.assetId, assetName: row.assetName, employee: row.employee,
+    returnDate: formattedDate, condition: returnForm.condition, notes: returnForm.notes || '-',
+  }
+  setReturnedRecords(prev => [newRecord, ...prev])
+  // Update assignment status
+  setAssignments(prev => prev.map(a => a.id === row.id ? { ...a, status: 'Returned', returnDate: formattedDate } : a))
+  // Update asset status back to Available
+  const asset = assets.find(a => a.Asset_ID === row.assetId)
+  if (asset) {
+    setAssets(prev => prev.map(a => a.Asset_ID === row.assetId ? { ...a, Status: 'Available' } : a))
+    try {
+      await fetch(`/api/assets/${asset._id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ Status: 'Available', assignedTo: '' })
+      })
+      await fetch(`/api/assignments/${row._id || ''}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'Returned', returnDate: formattedDate })
+      })
+    } catch(e) { console.error('Return update error:', e) }
+  }
+  setSelectedReturns(prev => prev.filter(x => x !== row.id))
+  setReturnModalRow(null)
+  setReturnTab('Recent')
+}
+
 
                   return (
                     <div className="animate-in fade-in duration-300 space-y-6">
@@ -5681,9 +5842,18 @@ const topDepts = Object.entries(deptCounts)
                       headers: { 'Content-Type': 'application/json' },
                       body: JSON.stringify({ Status: 'In Use', assignedTo: emp.name })
                     })
+                    pushNotification({ type: 'assignment', title: 'New Asset Assignment', desc: `${newRec.assetName} (${newRec.assetId}) assigned to ${newRec.employee}`, target: 'Asset Assignment' })
                   } catch(e) {
                     console.error('Save assignment error:', e)
                   }
+                  // 👇 NEW: close modal + reset form fields
+  setShowAssignModal(false)
+  setNewAssign({ assetId: '', empId: '', returnDate: '' })
+  setAssignAssetSearch('')
+  setAssignAssetSuggestions([])
+  setAssignEmpSearch('')
+  setAssignEmpSuggestions([])
+
                   }
 
                   return (
